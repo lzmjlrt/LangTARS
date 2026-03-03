@@ -230,11 +230,15 @@ class PluginHelper:
         """Press key in Chrome."""
         return await self._plugin.chrome_press_key(key)
 
-    # ========== AppleScript ==========
+    # ========== AppleScript / PowerShell ==========
 
     async def run_applescript(self, script: str) -> dict[str, Any]:
-        """Execute an AppleScript script."""
+        """Execute an AppleScript script (macOS only)."""
         return await self._plugin.run_applescript(script)
+
+    async def run_powershell(self, script: str, timeout: int = 30) -> dict[str, Any]:
+        """Execute a PowerShell script (Windows only)."""
+        return await self._plugin.run_powershell(script, timeout)
 
     # ========== Permission Check ==========
 

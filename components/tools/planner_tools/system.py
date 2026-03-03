@@ -1,11 +1,14 @@
 # System tools for planner
-# Shell, file, process, app management tools
+# Shell, file, process, app management tools (cross-platform: macOS + Windows)
 
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from . import BasePlannerTool
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 
 class ShellTool(BasePlannerTool):
@@ -17,6 +20,8 @@ class ShellTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if _IS_WINDOWS:
+            return "Execute a shell command on this Windows PC. Use this for running terminal commands like dir, Get-Process, Get-ChildItem, curl, etc."
         return "Execute a shell command on this Mac. Use this for running terminal commands like ls, ps, grep, curl, etc."
 
     @property
@@ -53,6 +58,8 @@ class ListProcessesTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if _IS_WINDOWS:
+            return "List running processes on this Windows PC."
         return "List running processes on this Mac."
 
     @property
@@ -124,6 +131,8 @@ class OpenAppTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if _IS_WINDOWS:
+            return "Open an application or URL on this Windows PC."
         return "Open an application or URL on this Mac."
 
     @property
@@ -193,6 +202,8 @@ class ListAppsTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if _IS_WINDOWS:
+            return "List running applications on this Windows PC."
         return "List running applications on this Mac."
 
     @property
@@ -221,6 +232,8 @@ class GetSystemInfoTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if _IS_WINDOWS:
+            return "Get system information about this Windows PC."
         return "Get system information about this Mac."
 
     @property
@@ -235,14 +248,30 @@ class GetSystemInfoTool(BasePlannerTool):
 
 
 class AppleScriptTool(BasePlannerTool):
-    """Execute AppleScript to control macOS applications"""
+    """Execute AppleScript (macOS) or PowerShell (Windows) to control applications"""
 
     @property
     def name(self) -> str:
+        if _IS_WINDOWS:
+            return "powershell"
         return "applescript"
 
     @property
     def description(self) -> str:
+        if _IS_WINDOWS:
+            return """Execute PowerShell to control Windows applications. Use this to:
+- Control applications (open, close, activate)
+- Interact with UI elements
+- Automate browser operations in Chrome/Edge
+- Control system settings
+- Manipulate files and folders
+
+Example for opening URL in Edge:
+Start-Process "msedge.exe" -ArgumentList "https://www.google.com/search?q=your+search+terms"
+
+Example for listing running apps:
+Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Select-Object ProcessName, MainWindowTitle"""
+
         return """Execute AppleScript to control macOS applications. Use this to:
 - Control applications (open, close, activate)
 - Interact with UI elements (click, type, select)
@@ -266,6 +295,17 @@ end tell"""
 
     @property
     def parameters(self) -> dict[str, Any]:
+        if _IS_WINDOWS:
+            return {
+                "type": "object",
+                "properties": {
+                    "script": {
+                        "type": "string",
+                        "description": "The PowerShell script to execute"
+                    }
+                },
+                "required": ["script"]
+            }
         return {
             "type": "object",
             "properties": {
@@ -282,7 +322,19 @@ end tell"""
         if not script:
             return {"success": False, "error": "No script provided"}
 
-        # Basic safety check - block potentially dangerous commands
+        if _IS_WINDOWS:
+            # Windows: block dangerous PowerShell patterns
+            dangerous_patterns = [
+                'Remove-Item -Recurse -Force C:\\',
+                'Format-Volume', 'rd /s /q C:\\',
+                'reg delete HKLM', 'bcdedit', 'diskpart',
+            ]
+            for pattern in dangerous_patterns:
+                if pattern.lower() in script.lower():
+                    return {"success": False, "error": f"Potentially dangerous command blocked: {pattern}"}
+            return await helper_plugin.run_powershell(script)
+
+        # macOS: block dangerous AppleScript patterns
         dangerous_patterns = ['rm -rf', 'format:', 'diskutil erase', 'do shell script "rm']
         for pattern in dangerous_patterns:
             if pattern.lower() in script.lower():

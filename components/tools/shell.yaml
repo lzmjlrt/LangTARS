@@ -6,8 +6,8 @@ metadata:
     en_US: Shell Command
     zh_Hans: Shell 命令
   description:
-    en_US: 'Execute a shell command on this Mac'
-    zh_Hans: '在此 Mac 上执行 shell 命令'
+    en_US: 'Execute a shell command on this computer (macOS/Windows)'
+    zh_Hans: '在此电脑上执行 shell 命令（macOS/Windows）'
 spec:
   parameters:
     type: object
@@ -24,7 +24,7 @@ spec:
         description: "Working directory (default: workspace)"
     required:
       - command
-  llm_prompt: 'Execute a shell command to perform various system operations like listing files, reading processes, checking system status, etc.'
+  llm_prompt: 'Execute a shell command to perform various system operations like listing files, reading processes, checking system status, etc. On Windows uses cmd/powershell, on macOS uses bash/zsh.'
 execution:
   python:
     path: shell.py

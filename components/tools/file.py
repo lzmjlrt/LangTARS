@@ -20,7 +20,7 @@ class FileTool(Tool):
         session: provider_session.Session,
         query_id: int,
     ) -> str:
-        """Perform file operations on this Mac."""
+        """Perform file operations on this computer."""
         from main import LangTARS
         plugin = LangTARS()
         await plugin.initialize()

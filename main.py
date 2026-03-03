@@ -1,9 +1,10 @@
 # LangTARS Plugin for LangBot
-# Control your Mac through IM messages
+# Control your computer through IM messages (macOS + Windows)
 
 from __future__ import annotations
 
 import logging
+import platform
 
 from components.helpers.logging_setup import setup_langtars_file_logging
 
@@ -18,16 +19,39 @@ from langbot_plugin.api.entities.builtin.command.context import ExecuteContext, 
 from components.helpers.browser import BrowserController
 from components.native.safari import SafariController
 from components.native.chrome import ChromeController
+from components.native.windows import (
+    WindowsController,
+    WindowsChromeController,
+    WindowsEdgeController,
+    is_windows,
+)
 from components.commands.langtars import LanTARSCommand
 
 
 class LangTARS(Command, BasePlugin):
-    """LangTARS Plugin - Control your Mac through IM messages"""
+    """LangTARS Plugin - Control your computer through IM messages (macOS + Windows)"""
 
-    DANGEROUS_PATTERNS = [
+    # macOS dangerous patterns
+    DANGEROUS_PATTERNS_MACOS = [
         r'rm\s+-rf\s+/', r'mkfs', r'dd\s+if=/dev/zero', r':(){:|:&};:',
         r'chmod\s+777\s+/', r'sudo\s+.*', r'>\s*/dev/', r'&\s*>/dev/',
     ]
+
+    # Windows dangerous patterns
+    DANGEROUS_PATTERNS_WINDOWS = [
+        r'Remove-Item\s+.*-Recurse\s+.*C:\\',
+        r'Format-Volume', r'rd\s+/s\s+/q\s+C:\\',
+        r'del\s+/f\s+/s\s+/q\s+C:\\',
+        r'reg\s+delete\s+HKLM',
+        r'bcdedit', r'diskpart',
+        r'shutdown\s+/[rsp]', r'::.*\|.*::',
+    ]
+
+    @property
+    def DANGEROUS_PATTERNS(self) -> list[str]:
+        if is_windows():
+            return self.DANGEROUS_PATTERNS_MACOS + self.DANGEROUS_PATTERNS_WINDOWS
+        return self.DANGEROUS_PATTERNS_MACOS
 
     def __init__(self):
         super().__init__()
@@ -41,6 +65,10 @@ class LangTARS(Command, BasePlugin):
         self._browser: BrowserController | None = None
         self._safari: SafariController | None = None
         self._chrome: ChromeController | None = None
+        self._windows: WindowsController | None = None
+        self._edge: WindowsEdgeController | None = None
+        self._win_chrome: WindowsChromeController | None = None
+        self._is_windows = is_windows()
 
         # Register subcommands - delegate to LanTARSCommand
         self.registered_subcommands = {
@@ -127,10 +155,15 @@ class LangTARS(Command, BasePlugin):
         self._initialized = True
         self._save_config_to_file(self.config)
 
-        # Initialize controllers
+        # Initialize controllers (platform-aware)
         self._browser = BrowserController(self.config)
-        self._safari = SafariController(self.run_applescript)
-        self._chrome = ChromeController(self.run_applescript)
+        if self._is_windows:
+            self._windows = WindowsController(self.run_shell)
+            self._win_chrome = WindowsChromeController(self.run_shell)
+            self._edge = WindowsEdgeController(self.run_shell)
+        else:
+            self._safari = SafariController(self.run_applescript)
+            self._chrome = ChromeController(self.run_applescript)
 
     # ========== Safety ==========
 
@@ -207,6 +240,10 @@ class LangTARS(Command, BasePlugin):
     async def list_processes(self, filter_pattern: str | None = None, limit: int = 20) -> dict:
         if not self.config.get('enable_process', True):
             return {'success': False, 'error': 'Disabled', 'processes': []}
+
+        if self._is_windows:
+            return await self._windows.list_processes(filter_pattern, limit)
+
         cmd = f'ps aux | grep -E "{filter_pattern}" | grep -v grep | head -n {limit}' if filter_pattern else f'ps aux | head -n {limit + 1}'
         result = await self.run_shell(cmd)
         if not result['success']:
@@ -221,6 +258,10 @@ class LangTARS(Command, BasePlugin):
     async def kill_process(self, target: str, force: bool = False) -> dict:
         if not self.config.get('enable_process', True):
             return {'success': False, 'error': 'Disabled'}
+
+        if self._is_windows:
+            return await self._windows.kill_process(target, force)
+
         cmd = f'kill -{"KILL" if force else "TERM"} {target}' if target.isdigit() else f'pkill -{"KILL" if force else "TERM"} "{target}"'
         result = await self.run_shell(cmd)
         return {'success': result['success'], 'message': f'Killed {target}' if result['success'] else result.get('error')}
@@ -270,6 +311,10 @@ class LangTARS(Command, BasePlugin):
     async def open_app(self, app_name: str | None = None, url: str | None = None) -> dict:
         if not self.config.get('enable_app', True):
             return {'success': False, 'error': 'Disabled'}
+
+        if self._is_windows:
+            return await self._windows.open_app(app_name, url)
+
         cmd = f'open "{url}"' if url else f'open -a "{app_name}"' if app_name else None
         if not cmd:
             return {'success': False, 'error': 'No target'}
@@ -279,24 +324,46 @@ class LangTARS(Command, BasePlugin):
     async def close_app(self, app_name: str, force: bool = False) -> dict:
         if not self.config.get('enable_app', True):
             return {'success': False, 'error': 'Disabled'}
+
+        if self._is_windows:
+            return await self._windows.close_app(app_name, force)
+
         result = await self.run_shell(f'pkill -{"9" if force else "TERM"} "{app_name}"')
         return {'success': result['success'], 'message': f'Closed {app_name}' if result['success'] else result.get('error')}
 
     async def list_apps(self, limit: int = 20) -> dict:
         if not self.config.get('enable_app', True):
             return {'success': False, 'error': 'Disabled', 'apps': []}
+
+        if self._is_windows:
+            return await self._windows.list_apps(limit)
+
         result = await self.run_shell(f"osascript -e 'tell app \"System Events\" to get name of every process' | tr ',' '\\n' | head -n {limit}")
         if result['success']:
             apps = [a.strip() for a in result['stdout'].strip().split('\n') if a.strip()]
             return {'success': True, 'apps': apps, 'count': len(apps)}
         return {'success': False, 'error': result.get('error'), 'apps': []}
 
+    async def get_frontmost_app(self) -> dict:
+        """Get the active/foreground application."""
+        if self._is_windows:
+            return await self._windows.get_frontmost_app()
+        # macOS: use AppleScript
+        script = 'tell application "System Events" to get name of first process whose frontmost is true'
+        result = await self.run_applescript(script)
+        if result.get('success'):
+            return {'success': True, 'app_name': result.get('stdout', '').strip()}
+        return {'success': False, 'error': result.get('error', 'Failed')}
+
     async def get_system_info(self) -> dict:
-        import platform
         try:
             info = {'platform': platform.system(), 'platform_version': platform.version(), 'architecture': platform.architecture()[0],
                    'processor': platform.processor(), 'hostname': platform.node(), 'python_version': platform.python_version()}
-            ur = await self.run_shell('uptime')
+            if self._is_windows:
+                # Windows: use systeminfo-like approach via PowerShell
+                ur = await self.run_shell('powershell -NoProfile -Command "(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime | ForEach-Object { \\"$($_.Days)d $($_.Hours)h $($_.Minutes)m\\" }"')
+            else:
+                ur = await self.run_shell('uptime')
             if ur['success']:
                 info['uptime'] = ur['stdout'].strip()
             return {'success': True, 'info': info}
@@ -309,6 +376,10 @@ class LangTARS(Command, BasePlugin):
         sp = self._resolve_path(path)
         if not sp:
             return {'success': False, 'error': 'Access denied', 'files': []}
+
+        if self._is_windows:
+            return await self._windows.search_files(pattern, str(sp), recursive)
+
         cmd = f'find "{sp}" -name "*{pattern}*" -type f 2>/dev/null | head -n 50' if recursive else f'ls "{sp}" | grep -i "*{pattern}*" | head -n 50'
         result = await self.run_shell(cmd)
         if result['success']:
@@ -316,8 +387,18 @@ class LangTARS(Command, BasePlugin):
             return {'success': True, 'files': files, 'count': len(files)}
         return {'success': False, 'error': result.get('error'), 'files': []}
 
+    async def run_powershell(self, script: str, timeout: int = 30) -> dict:
+        """Execute a PowerShell script (Windows only)."""
+        if not self._is_windows:
+            return {'success': False, 'error': 'PowerShell is only available on Windows'}
+        if not self._windows:
+            return {'success': False, 'error': 'Windows controller not initialized'}
+        return await self._windows.run_powershell(script, timeout)
+
     async def run_applescript(self, script: str) -> dict:
         import tempfile, os
+        if self._is_windows:
+            return {'success': False, 'error': 'AppleScript is not available on Windows. Use PowerShell instead.'}
         if not self.config.get('enable_applescript', True):
             return {'success': False, 'error': 'Disabled'}
         if not script:
@@ -356,19 +437,64 @@ class LangTARS(Command, BasePlugin):
     async def browser_get_attribute(self, s, a): return await self._browser.get_attribute(s, a) if self._browser else {'success': False}
     async def browser_cleanup(self): return await self._browser.cleanup() if self._browser else {'success': True}
 
-    async def safari_open(self, u=None): return await self._safari.open(u) if self._safari else {'success': False}
-    async def safari_navigate(self, u): return await self._safari.navigate(u) if self._safari else {'success': False}
-    async def safari_get_content(self): return await self._safari.get_content() if self._safari else {'success': False}
-    async def safari_click(self, s): return await self._safari.click(s) if self._safari else {'success': False}
-    async def safari_type(self, s, t): return await self._safari.type(s, t) if self._safari else {'success': False}
-    async def safari_press_key(self, k): return await self._safari.press_key(k) if self._safari else {'success': False}
+    async def safari_open(self, u=None):
+        if self._is_windows:
+            return await self._edge.open(u) if self._edge else {'success': False, 'error': 'Safari is not available on Windows. Edge is used as alternative.'}
+        return await self._safari.open(u) if self._safari else {'success': False}
+    async def safari_navigate(self, u):
+        if self._is_windows:
+            return await self._edge.navigate(u) if self._edge else {'success': False}
+        return await self._safari.navigate(u) if self._safari else {'success': False}
+    async def safari_get_content(self):
+        if self._is_windows:
+            return await self._edge.get_content() if self._edge else {'success': False}
+        return await self._safari.get_content() if self._safari else {'success': False}
+    async def safari_click(self, s):
+        if self._is_windows:
+            return await self._edge.click(s) if self._edge else {'success': False}
+        return await self._safari.click(s) if self._safari else {'success': False}
+    async def safari_type(self, s, t):
+        if self._is_windows:
+            return await self._edge.type(s, t) if self._edge else {'success': False}
+        return await self._safari.type(s, t) if self._safari else {'success': False}
+    async def safari_press_key(self, k):
+        if self._is_windows:
+            return await self._edge.press_key(k) if self._edge else {'success': False}
+        return await self._safari.press_key(k) if self._safari else {'success': False}
 
-    async def chrome_open(self, u=None): return await self._chrome.open(u) if self._chrome else {'success': False}
-    async def chrome_navigate(self, u): return await self._chrome.navigate(u) if self._chrome else {'success': False}
-    async def chrome_get_content(self): return await self._chrome.get_content() if self._chrome else {'success': False}
-    async def chrome_click(self, s): return await self._chrome.click(s) if self._chrome else {'success': False}
-    async def chrome_type(self, s, t): return await self._chrome.type(s, t) if self._chrome else {'success': False}
-    async def chrome_press_key(self, k): return await self._chrome.press_key(k) if self._chrome else {'success': False}
+    async def chrome_open(self, u=None):
+        if self._is_windows:
+            return await self._win_chrome.open(u) if self._win_chrome else {'success': False}
+        return await self._chrome.open(u) if self._chrome else {'success': False}
+    async def chrome_navigate(self, u):
+        if self._is_windows:
+            return await self._win_chrome.navigate(u) if self._win_chrome else {'success': False}
+        return await self._chrome.navigate(u) if self._chrome else {'success': False}
+    async def chrome_get_content(self):
+        if self._is_windows:
+            return await self._win_chrome.get_content() if self._win_chrome else {'success': False}
+        return await self._chrome.get_content() if self._chrome else {'success': False}
+    async def chrome_click(self, s):
+        if self._is_windows:
+            return await self._win_chrome.click(s) if self._win_chrome else {'success': False}
+        return await self._chrome.click(s) if self._chrome else {'success': False}
+    async def chrome_type(self, s, t):
+        if self._is_windows:
+            return await self._win_chrome.type(s, t) if self._win_chrome else {'success': False}
+        return await self._chrome.type(s, t) if self._chrome else {'success': False}
+    async def chrome_press_key(self, k):
+        if self._is_windows:
+            return await self._win_chrome.press_key(k) if self._win_chrome else {'success': False}
+        return await self._chrome.press_key(k) if self._chrome else {'success': False}
+
+    # ========== Windows-specific Delegates ==========
+
+    async def edge_open(self, u=None): return await self._edge.open(u) if self._edge else {'success': False, 'error': 'Edge controller not available'}
+    async def edge_navigate(self, u): return await self._edge.navigate(u) if self._edge else {'success': False}
+    async def edge_get_content(self): return await self._edge.get_content() if self._edge else {'success': False}
+    async def edge_click(self, s): return await self._edge.click(s) if self._edge else {'success': False}
+    async def edge_type(self, s, t): return await self._edge.type(s, t) if self._edge else {'success': False}
+    async def edge_press_key(self, k): return await self._edge.press_key(k) if self._edge else {'success': False}
 
     # ========== Commands ==========
 

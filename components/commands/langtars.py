@@ -445,10 +445,21 @@ class LanTARSCommand:
 
         log_files = [
             Path.home() / ".langtars" / "logs" / "langtars.log",
-            Path("/tmp/langtars.log"),
-            Path("/tmp/langtars_planner.log"),
-            Path.home() / "Library" / "Logs" / "langtars.log",
         ]
+
+        import platform
+        if platform.system() == "Windows":
+            log_files.extend([
+                Path.home() / "AppData" / "Local" / "langtars" / "langtars.log",
+                Path(r"C:\Temp\langtars.log"),
+                Path(r"C:\Temp\langtars_planner.log"),
+            ])
+        else:
+            log_files.extend([
+                Path("/tmp/langtars.log"),
+                Path("/tmp/langtars_planner.log"),
+                Path.home() / "Library" / "Logs" / "langtars.log",
+            ])
 
         output_blocks = []
         for log_file in log_files:
@@ -569,7 +580,12 @@ class LanTARSCommand:
     @staticmethod
     async def default(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
         """Handle default case - show help."""
-        help_text = """LangTARS - Control your Mac through IM messages
+        import platform
+        sys_name = "Windows PC" if platform.system() == "Windows" else "Mac"
+        stop_hint = ("To stop a running task:\n  !tars stop") if platform.system() == "Windows" else (
+            "To stop a running task, run in terminal:\n  touch /tmp/langtars_user_stop"
+        )
+        help_text = f"""LangTARS - Control your {sys_name} through IM messages
 
 Available commands:
   !tars shell <command>   - Execute shell command
@@ -587,15 +603,14 @@ Available commands:
   !tars search <pattern> - Search files
   !tars auto <task>      - Autonomous task planning (AI-powered)
 
-To stop a running task, run in terminal:
-  touch /tmp/langtars_user_stop
+{stop_hint}
 
 Examples:
   !tars info
-  !tars shell ls -la
+  !tars shell {"dir" if platform.system() == "Windows" else "ls -la"}
   !tars ps python
-  !tars open Safari
-  !tars auto Open Safari and search for AI news
+  !tars open {"Edge" if platform.system() == "Windows" else "Safari"}
+  !tars auto {"Open Edge" if platform.system() == "Windows" else "Open Safari"} and search for AI news
 """
         yield CommandReturn(text=help_text)
 

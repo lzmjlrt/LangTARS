@@ -20,7 +20,7 @@ class AppTool(Tool):
         session: provider_session.Session,
         query_id: int,
     ) -> str:
-        """Control applications on this Mac."""
+        """Control applications on this computer."""
         from main import LangTARS
         plugin = LangTARS()
         await plugin.initialize()
