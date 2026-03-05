@@ -230,11 +230,89 @@ class PluginHelper:
         """Press key in Chrome."""
         return await self._plugin.chrome_press_key(key)
 
-    # ========== AppleScript ==========
+    # ========== Edge Control (Windows) ==========
+
+    async def edge_open(self, url: str | None = None) -> dict[str, Any]:
+        """Open Edge (optionally with URL)."""
+        return await self._plugin.edge_open(url)
+
+    async def edge_navigate(self, url: str) -> dict[str, Any]:
+        """Navigate to URL in Edge."""
+        return await self._plugin.edge_navigate(url)
+
+    async def edge_get_content(self) -> dict[str, Any]:
+        """Get content from Edge."""
+        return await self._plugin.edge_get_content()
+
+    async def edge_search(self, query: str) -> dict[str, Any]:
+        """Search in Edge."""
+        return await self._plugin.edge_search(query)
+
+    async def edge_press_key(self, key: str) -> dict[str, Any]:
+        """Press key in Edge."""
+        return await self._plugin.edge_press_key(key)
+
+    async def edge_focus_and_type(self, text: str) -> dict[str, Any]:
+        """Type text into the focused element in Edge."""
+        return await self._plugin.edge_focus_and_type(text)
+
+    # ========== AppleScript (macOS) ==========
 
     async def run_applescript(self, script: str) -> dict[str, Any]:
-        """Execute an AppleScript script."""
+        """Execute an AppleScript script (macOS only)."""
         return await self._plugin.run_applescript(script)
+
+    # ========== PowerShell (Windows) ==========
+
+    async def run_powershell(self, script: str) -> dict[str, Any]:
+        """Execute a PowerShell script (Windows only)."""
+        return await self._plugin.run_powershell(script)
+
+    # ========== Windows-specific Methods ==========
+
+    async def windows_send_keys(self, keys: str) -> dict[str, Any]:
+        """Send keystrokes to the active window (Windows only)."""
+        return await self._plugin.windows_send_keys(keys)
+
+    async def windows_type_text(self, text: str) -> dict[str, Any]:
+        """Type text into the active window (Windows only)."""
+        return await self._plugin.windows_type_text(text)
+
+    async def windows_press_key(self, key: str) -> dict[str, Any]:
+        """Press a special key (Windows only)."""
+        return await self._plugin.windows_press_key(key)
+
+    async def windows_get_active_window(self) -> dict[str, Any]:
+        """Get information about the active window (Windows only)."""
+        return await self._plugin.windows_get_active_window()
+
+    async def windows_focus_window(self, title_or_process: str) -> dict[str, Any]:
+        """Focus a window by title or process name (Windows only)."""
+        return await self._plugin.windows_focus_window(title_or_process)
+
+    async def windows_minimize_window(self, title_or_process: str | None = None) -> dict[str, Any]:
+        """Minimize a window (Windows only)."""
+        return await self._plugin.windows_minimize_window(title_or_process)
+
+    async def windows_maximize_window(self, title_or_process: str | None = None) -> dict[str, Any]:
+        """Maximize a window (Windows only)."""
+        return await self._plugin.windows_maximize_window(title_or_process)
+
+    async def windows_screenshot(self, path: str | None = None) -> dict[str, Any]:
+        """Take a screenshot (Windows only)."""
+        return await self._plugin.windows_screenshot(path)
+
+    async def windows_get_clipboard(self) -> dict[str, Any]:
+        """Get clipboard content (Windows only)."""
+        return await self._plugin.windows_get_clipboard()
+
+    async def windows_set_clipboard(self, text: str) -> dict[str, Any]:
+        """Set clipboard content (Windows only)."""
+        return await self._plugin.windows_set_clipboard(text)
+
+    async def windows_show_notification(self, title: str, message: str) -> dict[str, Any]:
+        """Show a Windows toast notification (Windows only)."""
+        return await self._plugin.windows_show_notification(title, message)
 
     # ========== Permission Check ==========
 

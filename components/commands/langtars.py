@@ -990,6 +990,7 @@ Go to Pipelines → Configure → Select LLM Model
             bot_uuid: str | None = None
             try:
                 bot_uuid = await context.get_bot_uuid()
+                logger.info(f"[AUTO] Got bot_uuid from context: {bot_uuid}")
             except Exception as e:
                 logger.warning(f"Failed to get bot uuid for background send: {e}")
             if not bot_uuid:
@@ -997,10 +998,12 @@ Go to Pipelines → Configure → Select LLM Model
                     conversation = getattr(context.session, "using_conversation", None)
                     if conversation and getattr(conversation, "bot_uuid", None):
                         bot_uuid = str(conversation.bot_uuid)
+                        logger.info(f"[AUTO] Got bot_uuid from conversation: {bot_uuid}")
                 except Exception:
                     pass
             target_type = context.session.launcher_type.value
             raw_target_id = context.session.launcher_id
+            logger.info(f"[AUTO] target_type={target_type}, raw_target_id={raw_target_id}, bot_uuid={bot_uuid}")
 
             def _candidate_target_ids(raw_id: Any) -> list[Any]:
                 ids: list[Any] = []
@@ -1033,6 +1036,7 @@ Go to Pipelines → Configure → Select LLM Model
 
             async def _auto_execute_result_reply() -> None:
                 """Auto-run result behavior when task ends via send_message (query-independent)."""
+                logger.info(f"[AUTO] _auto_execute_result_reply called, bot_uuid={bot_uuid}, target_type={target_type}, raw_target_id={raw_target_id}")
                 pending = BackgroundTaskManager.get_pending_result()
                 if pending:
                     msg = f"📬 Last task result (fallback):\n\n{pending}"
@@ -1042,6 +1046,7 @@ Go to Pipelines → Configure → Select LLM Model
                         msg = f"📄 Last task result:\n\n{last}"
                     else:
                         msg = "No task result found."
+                logger.info(f"[AUTO] Message to send: {msg[:100]}...")
                 try:
                     if not bot_uuid:
                         raise RuntimeError("missing bot_uuid")
@@ -1049,6 +1054,7 @@ Go to Pipelines → Configure → Select LLM Model
                     errors: list[str] = []
                     for cid in _candidate_target_ids(raw_target_id):
                         try:
+                            logger.info(f"[AUTO] Trying to send to bot_uuid={bot_uuid}, target_type={target_type}, target_id={cid}")
                             await _self_cmd.plugin.send_message(
                                 bot_uuid=bot_uuid,
                                 target_type=target_type,
@@ -1059,6 +1065,7 @@ Go to Pipelines → Configure → Select LLM Model
                             sent = True
                             break
                         except Exception as send_err:
+                            logger.warning(f"[AUTO] send_message failed for {cid}: {send_err}")
                             errors.append(f"{cid!r}: {send_err}")
                     if sent:
                         # Only clear pending after a successful auto send.

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from . import BasePlannerTool
@@ -15,6 +16,10 @@ from .system import (
     ListAppsTool,
     GetSystemInfoTool,
     AppleScriptTool,
+    PowerShellTool,
+    WindowsSendKeysTool,
+    WindowsFocusWindowTool,
+    WindowsScreenshotTool,
 )
 from .file import (
     ReadFileTool,
@@ -53,9 +58,19 @@ from .browser import (
     ChromeClickTool,
     ChromeTypeTool,
     ChromePressKeyTool,
+    # Edge tools (Windows)
+    EdgeOpenTool,
+    EdgeNavigateTool,
+    EdgeGetContentTool,
+    EdgeSearchTool,
+    EdgePressKeyTool,
 )
 from .dynamic import DynamicToolLoader
 from .skills import SkillLoader, SkillToToolConverter
+
+# Platform detection
+IS_MACOS = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
 
 
 # Built-in tools that are always available
@@ -68,7 +83,6 @@ BUILTIN_TOOLS: list[type[BasePlannerTool]] = [
     CloseAppTool,
     ListAppsTool,
     GetSystemInfoTool,
-    AppleScriptTool,
     # File tools
     ReadFileTool,
     WriteFileTool,
@@ -76,7 +90,7 @@ BUILTIN_TOOLS: list[type[BasePlannerTool]] = [
     SearchFilesTool,
     # Network tools
     FetchURLTool,
-    # Browser tools
+    # Browser tools (cross-platform via Playwright)
     BrowserNavigateTool,
     BrowserClickTool,
     BrowserTypeTool,
@@ -92,20 +106,37 @@ BUILTIN_TOOLS: list[type[BasePlannerTool]] = [
     BrowserPressKeyTool,
     BrowserSelectOptionTool,
     BrowserGetAttributeTool,
-    # Safari native tools
-    SafariOpenTool,
-    SafariNavigateTool,
-    SafariGetContentTool,
-    SafariClickTool,
-    SafariTypeTool,
-    SafariPressKeyTool,
-    # Chrome native tools
+    # Chrome native tools (cross-platform)
     ChromeOpenTool,
     ChromeNavigateTool,
     ChromeGetContentTool,
     ChromeClickTool,
     ChromeTypeTool,
     ChromePressKeyTool,
+]
+
+# macOS-specific tools
+MACOS_TOOLS: list[type[BasePlannerTool]] = [
+    AppleScriptTool,
+    SafariOpenTool,
+    SafariNavigateTool,
+    SafariGetContentTool,
+    SafariClickTool,
+    SafariTypeTool,
+    SafariPressKeyTool,
+]
+
+# Windows-specific tools
+WINDOWS_TOOLS: list[type[BasePlannerTool]] = [
+    PowerShellTool,
+    WindowsSendKeysTool,
+    WindowsFocusWindowTool,
+    WindowsScreenshotTool,
+    EdgeOpenTool,
+    EdgeNavigateTool,
+    EdgeGetContentTool,
+    EdgeSearchTool,
+    EdgePressKeyTool,
 ]
 
 
@@ -127,9 +158,19 @@ class ToolRegistry:
         import logging
         logger = logging.getLogger(__name__)
 
+        # Determine which tools to load based on platform
+        tools_to_load = list(BUILTIN_TOOLS)
+        
+        if IS_MACOS:
+            tools_to_load.extend(MACOS_TOOLS)
+            logger.info("Loading macOS-specific tools")
+        elif IS_WINDOWS:
+            tools_to_load.extend(WINDOWS_TOOLS)
+            logger.info("Loading Windows-specific tools")
+
         # Register built-in tools
-        logger.info(f"开始初始化工具注册表，BUILTIN_TOOLS 数量: {len(BUILTIN_TOOLS)}")
-        for tool_class in BUILTIN_TOOLS:
+        logger.info(f"开始初始化工具注册表，工具数量: {len(tools_to_load)}")
+        for tool_class in tools_to_load:
             try:
                 tool = tool_class()
                 self._builtin_tools[tool.name] = tool

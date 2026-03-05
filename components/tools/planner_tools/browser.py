@@ -793,3 +793,137 @@ class ChromePressKeyTool(BasePlannerTool):
 
     async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         return await helper_plugin.chrome_press_key(arguments.get('key', ''))
+
+
+# ========== Edge Native Browser Tools (Windows) ==========
+# Control Microsoft Edge on Windows
+
+
+class EdgeOpenTool(BasePlannerTool):
+    """Open Microsoft Edge browser (Windows)"""
+
+    @property
+    def name(self) -> str:
+        return "edge_open"
+
+    @property
+    def description(self) -> str:
+        return "Open Microsoft Edge browser on Windows. Use when user explicitly says 'Edge'."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Optional URL to open in Edge"
+                }
+            }
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await helper_plugin.edge_open(arguments.get('url'))
+
+
+class EdgeNavigateTool(BasePlannerTool):
+    """Navigate to URL in Edge"""
+
+    @property
+    def name(self) -> str:
+        return "edge_navigate"
+
+    @property
+    def description(self) -> str:
+        return "Navigate to a URL in Microsoft Edge. Use when user explicitly wants to use Edge on Windows."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to navigate to (e.g., 'https://github.com')"
+                }
+            },
+            "required": ["url"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await helper_plugin.edge_navigate(arguments.get('url', ''))
+
+
+class EdgeGetContentTool(BasePlannerTool):
+    """Get content from Edge"""
+
+    @property
+    def name(self) -> str:
+        return "edge_get_content"
+
+    @property
+    def description(self) -> str:
+        return "Get the current page content from Microsoft Edge."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await helper_plugin.edge_get_content()
+
+
+class EdgeSearchTool(BasePlannerTool):
+    """Search in Edge"""
+
+    @property
+    def name(self) -> str:
+        return "edge_search"
+
+    @property
+    def description(self) -> str:
+        return "Search the web using Microsoft Edge on Windows."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query"
+                }
+            },
+            "required": ["query"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await helper_plugin.edge_search(arguments.get('query', ''))
+
+
+class EdgePressKeyTool(BasePlannerTool):
+    """Press key in Edge"""
+
+    @property
+    def name(self) -> str:
+        return "edge_press"
+
+    @property
+    def description(self) -> str:
+        return "Press a keyboard key in Microsoft Edge."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Key to press (e.g., 'Enter', 'Tab')"
+                }
+            },
+            "required": ["key"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        return await helper_plugin.edge_press_key(arguments.get('key', ''))

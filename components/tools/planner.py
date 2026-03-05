@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
 import time
 import multiprocessing
 from pathlib import Path
@@ -1634,13 +1635,15 @@ class PlannerExecutor:
 class SubprocessPlanner:
     """Subprocess-based planner executor for parallel command execution"""
 
+    # Use cross-platform temp directory
+    _TEMP_DIR = tempfile.gettempdir()
     # PID file path for tracking subprocess
-    _PID_FILE = "/tmp/langtars_planner_pid"
+    _PID_FILE = os.path.join(_TEMP_DIR, "langtars_planner_pid")
     # Stop file - when this is deleted, the thread will stop
-    _STOP_FILE = "/tmp/langtars_planner_stop"
+    _STOP_FILE = os.path.join(_TEMP_DIR, "langtars_planner_stop")
     # User stop file - user can create this file to stop the current task
-    # Usage: touch /tmp/langtars_user_stop
-    _USER_STOP_FILE = "/tmp/langtars_user_stop"
+    # Usage: touch /tmp/langtars_user_stop (or equivalent on Windows)
+    _USER_STOP_FILE = os.path.join(_TEMP_DIR, "langtars_user_stop")
 
     # Process instance for true subprocess (not thread)
     _process: Any = None
@@ -1694,8 +1697,9 @@ class SubprocessPlanner:
         try:
             with open(cls._STOP_FILE, 'w') as f:
                 f.write("1")
-        except Exception:
-            pass
+            logger.debug(f"Created run file: {cls._STOP_FILE}")
+        except Exception as e:
+            logger.error(f"Failed to create run file {cls._STOP_FILE}: {e}")
 
     @classmethod
     def _remove_run_file(cls):

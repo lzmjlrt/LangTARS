@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from . import BasePlannerTool
+
+# Platform detection
+IS_MACOS = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
+PLATFORM_NAME = "Windows" if IS_WINDOWS else "Mac" if IS_MACOS else "Linux"
 
 
 class ShellTool(BasePlannerTool):
@@ -17,6 +23,8 @@ class ShellTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if IS_WINDOWS:
+            return "Execute a shell command on this Windows PC. Use this for running commands like dir, tasklist, findstr, curl, etc."
         return "Execute a shell command on this Mac. Use this for running terminal commands like ls, ps, grep, curl, etc."
 
     @property
@@ -53,7 +61,7 @@ class ListProcessesTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
-        return "List running processes on this Mac."
+        return f"List running processes on this {PLATFORM_NAME}."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -124,7 +132,9 @@ class OpenAppTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
-        return "Open an application or URL on this Mac."
+        if IS_WINDOWS:
+            return "Open an application or URL on this Windows PC. Examples: 'notepad', 'chrome', 'https://google.com'"
+        return "Open an application or URL on this Mac. Examples: 'Safari', 'Chrome', 'https://google.com'"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -133,7 +143,7 @@ class OpenAppTool(BasePlannerTool):
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Application name (e.g., 'Safari') or URL (e.g., 'https://...')"
+                    "description": "Application name (e.g., 'Safari', 'notepad') or URL (e.g., 'https://...')"
                 }
             },
             "required": ["target"]
@@ -193,7 +203,7 @@ class ListAppsTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
-        return "List running applications on this Mac."
+        return f"List running applications on this {PLATFORM_NAME}."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -221,7 +231,7 @@ class GetSystemInfoTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
-        return "Get system information about this Mac."
+        return f"Get system information about this {PLATFORM_NAME}."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -235,7 +245,7 @@ class GetSystemInfoTool(BasePlannerTool):
 
 
 class AppleScriptTool(BasePlannerTool):
-    """Execute AppleScript to control macOS applications"""
+    """Execute AppleScript to control macOS applications (macOS only)"""
 
     @property
     def name(self) -> str:
@@ -243,6 +253,8 @@ class AppleScriptTool(BasePlannerTool):
 
     @property
     def description(self) -> str:
+        if IS_WINDOWS:
+            return "AppleScript is only available on macOS. Use 'powershell' tool instead on Windows."
         return """Execute AppleScript to control macOS applications. Use this to:
 - Control applications (open, close, activate)
 - Interact with UI elements (click, type, select)
@@ -278,6 +290,9 @@ end tell"""
         }
 
     async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        if IS_WINDOWS:
+            return {"success": False, "error": "AppleScript is only available on macOS. Use PowerShell on Windows."}
+        
         script = arguments.get('script', '')
         if not script:
             return {"success": False, "error": "No script provided"}
@@ -289,3 +304,179 @@ end tell"""
                 return {"success": False, "error": f"Potentially dangerous command blocked: {pattern}"}
 
         return await helper_plugin.run_applescript(script)
+
+
+class PowerShellTool(BasePlannerTool):
+    """Execute PowerShell to control Windows applications (Windows only)"""
+
+    @property
+    def name(self) -> str:
+        return "powershell"
+
+    @property
+    def description(self) -> str:
+        if IS_MACOS:
+            return "PowerShell is only available on Windows. Use 'applescript' tool instead on macOS."
+        return """Execute PowerShell script to control Windows applications and system. Use this to:
+- Control applications (open, close, focus windows)
+- Interact with UI elements (send keys, type text)
+- Automate browser operations in Edge/Chrome
+- Control system settings
+- Manage files and processes
+- Access Windows APIs
+
+Example for opening a URL in Edge:
+Start-Process "msedge" -ArgumentList "https://www.google.com"
+
+Example for sending keystrokes:
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.SendKeys]::SendWait("Hello World")
+
+Example for getting system info:
+Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version"""
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "script": {
+                    "type": "string",
+                    "description": "The PowerShell script to execute"
+                }
+            },
+            "required": ["script"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        if IS_MACOS:
+            return {"success": False, "error": "PowerShell is only available on Windows. Use AppleScript on macOS."}
+        
+        script = arguments.get('script', '')
+        if not script:
+            return {"success": False, "error": "No script provided"}
+
+        # Basic safety check - block potentially dangerous commands
+        dangerous_patterns = ['format ', 'Remove-Item -Recurse -Force C:', 'rd /s', 'del /f /s', 'diskpart', 'bcdedit']
+        for pattern in dangerous_patterns:
+            if pattern.lower() in script.lower():
+                return {"success": False, "error": f"Potentially dangerous command blocked: {pattern}"}
+
+        return await helper_plugin.run_powershell(script)
+
+
+class WindowsSendKeysTool(BasePlannerTool):
+    """Send keystrokes to the active window (Windows only)"""
+
+    @property
+    def name(self) -> str:
+        return "windows_send_keys"
+
+    @property
+    def description(self) -> str:
+        if IS_MACOS:
+            return "This tool is only available on Windows."
+        return """Send keystrokes to the active window on Windows. Use this to:
+- Type text into any application
+- Press special keys (Enter, Tab, Escape, etc.)
+- Use keyboard shortcuts (Ctrl+C, Alt+Tab, etc.)
+
+Special key syntax:
+- Enter: ~
+- Tab: {TAB}
+- Escape: {ESC}
+- Ctrl+key: ^key (e.g., ^c for Ctrl+C)
+- Alt+key: %key (e.g., %{F4} for Alt+F4)
+- Shift+key: +key"""
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "string",
+                    "description": "The keys to send (using SendKeys syntax)"
+                }
+            },
+            "required": ["keys"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        if IS_MACOS:
+            return {"success": False, "error": "This tool is only available on Windows."}
+        
+        keys = arguments.get('keys', '')
+        if not keys:
+            return {"success": False, "error": "No keys provided"}
+
+        return await helper_plugin.windows_send_keys(keys)
+
+
+class WindowsFocusWindowTool(BasePlannerTool):
+    """Focus a window by title or process name (Windows only)"""
+
+    @property
+    def name(self) -> str:
+        return "windows_focus_window"
+
+    @property
+    def description(self) -> str:
+        if IS_MACOS:
+            return "This tool is only available on Windows."
+        return "Bring a window to the foreground by its title or process name on Windows."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Window title or process name to focus"
+                }
+            },
+            "required": ["target"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        if IS_MACOS:
+            return {"success": False, "error": "This tool is only available on Windows."}
+        
+        target = arguments.get('target', '')
+        if not target:
+            return {"success": False, "error": "No target provided"}
+
+        return await helper_plugin.windows_focus_window(target)
+
+
+class WindowsScreenshotTool(BasePlannerTool):
+    """Take a screenshot (Windows only)"""
+
+    @property
+    def name(self) -> str:
+        return "windows_screenshot"
+
+    @property
+    def description(self) -> str:
+        if IS_MACOS:
+            return "This tool is only available on Windows."
+        return "Take a screenshot of the entire screen on Windows."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to save the screenshot (optional, defaults to temp folder)"
+                }
+            }
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        if IS_MACOS:
+            return {"success": False, "error": "This tool is only available on Windows."}
+        
+        return await helper_plugin.windows_screenshot(arguments.get('path'))

@@ -1,9 +1,10 @@
 # LangTARS Plugin for LangBot
-# Control your Mac through IM messages
+# Control your computer through IM messages (supports macOS and Windows)
 
 from __future__ import annotations
 
 import logging
+import platform
 
 from components.helpers.logging_setup import setup_langtars_file_logging
 
@@ -16,17 +17,32 @@ from langbot_plugin.api.definition.plugin import BasePlugin
 from langbot_plugin.api.entities.builtin.command.context import ExecuteContext, CommandReturn
 
 from components.helpers.browser import BrowserController
-from components.native.safari import SafariController
-from components.native.chrome import ChromeController
 from components.commands.langtars import LanTARSCommand
+
+# Platform detection
+IS_MACOS = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
+IS_LINUX = platform.system() == "Linux"
+
+# Import platform-specific modules
+if IS_MACOS:
+    from components.native.safari import SafariController
+    from components.native.chrome import ChromeController
+elif IS_WINDOWS:
+    from components.native.windows import WindowsController
+    from components.native.edge import EdgeController
+    from components.native.chrome_windows import ChromeWindowsController
 
 
 class LangTARS(Command, BasePlugin):
-    """LangTARS Plugin - Control your Mac through IM messages"""
+    """LangTARS Plugin - Control your computer through IM messages"""
 
     DANGEROUS_PATTERNS = [
         r'rm\s+-rf\s+/', r'mkfs', r'dd\s+if=/dev/zero', r':(){:|:&};:',
         r'chmod\s+777\s+/', r'sudo\s+.*', r'>\s*/dev/', r'&\s*>/dev/',
+        # Windows dangerous patterns
+        r'format\s+[a-z]:', r'del\s+/[sfq]', r'rd\s+/s', r'rmdir\s+/s',
+        r'reg\s+delete', r'bcdedit', r'diskpart',
     ]
 
     def __init__(self):
@@ -36,11 +52,19 @@ class LangTARS(Command, BasePlugin):
         self._allowed_users: set = set()
         self._command_whitelist: list = []
         self._initialized = False
+        self._platform = platform.system()
 
         # Controllers
         self._browser: BrowserController | None = None
-        self._safari: SafariController | None = None
-        self._chrome: ChromeController | None = None
+        
+        # macOS controllers
+        self._safari: "SafariController | None" = None
+        self._chrome: "ChromeController | None" = None
+        
+        # Windows controllers
+        self._windows: "WindowsController | None" = None
+        self._edge: "EdgeController | None" = None
+        self._chrome_win: "ChromeWindowsController | None" = None
 
         # Register subcommands - delegate to LanTARSCommand
         self.registered_subcommands = {
@@ -127,10 +151,16 @@ class LangTARS(Command, BasePlugin):
         self._initialized = True
         self._save_config_to_file(self.config)
 
-        # Initialize controllers
+        # Initialize controllers based on platform
         self._browser = BrowserController(self.config)
-        self._safari = SafariController(self.run_applescript)
-        self._chrome = ChromeController(self.run_applescript)
+        
+        if IS_MACOS:
+            self._safari = SafariController(self.run_applescript)
+            self._chrome = ChromeController(self.run_applescript)
+        elif IS_WINDOWS:
+            self._windows = WindowsController(self.run_powershell)
+            self._edge = EdgeController(self.run_powershell)
+            self._chrome_win = ChromeWindowsController(self.run_powershell)
 
     # ========== Safety ==========
 
@@ -171,8 +201,15 @@ class LangTARS(Command, BasePlugin):
                 working_path = wp
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=str(working_path))
+            # Use different shell based on platform
+            if IS_WINDOWS:
+                # Use cmd.exe on Windows
+                process = await asyncio.create_subprocess_shell(
+                    command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, 
+                    cwd=str(working_path), shell=True)
+            else:
+                process = await asyncio.create_subprocess_shell(
+                    command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=str(working_path))
             try:
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
             except asyncio.TimeoutError:
@@ -186,6 +223,53 @@ class LangTARS(Command, BasePlugin):
             }
         except Exception as e:
             return {'success': False, 'error': str(e), 'stdout': '', 'stderr': '', 'returncode': -1}
+
+    async def run_powershell(self, script: str, timeout: int = 30) -> dict:
+        """Execute a PowerShell script (Windows only)."""
+        import asyncio
+        import tempfile
+        import os
+
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'PowerShell is only available on Windows'}
+
+        if not self.config.get('enable_powershell', True):
+            return {'success': False, 'error': 'PowerShell disabled'}
+
+        if not script:
+            return {'success': False, 'error': 'No script provided'}
+
+        try:
+            # Write script to temp file to handle complex scripts
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', delete=False, encoding='utf-8') as f:
+                f.write(script)
+                temp_file = f.name
+
+            try:
+                # Execute PowerShell with the script file
+                cmd = f'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "{temp_file}"'
+                process = await asyncio.create_subprocess_shell(
+                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                try:
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    return {'success': False, 'error': f'Timeout after {timeout}s', 'stdout': '', 'stderr': ''}
+                
+                return {
+                    'success': process.returncode == 0,
+                    'stdout': stdout.decode('utf-8', errors='replace'),
+                    'stderr': stderr.decode('utf-8', errors='replace'),
+                    'returncode': process.returncode,
+                    'error': stderr.decode('utf-8', errors='replace') if process.returncode != 0 else '',
+                }
+            finally:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+        except Exception as e:
+            return {'success': False, 'error': str(e), 'stdout': '', 'stderr': ''}
 
     def _resolve_path(self, path: str):
         from pathlib import Path
@@ -207,23 +291,37 @@ class LangTARS(Command, BasePlugin):
     async def list_processes(self, filter_pattern: str | None = None, limit: int = 20) -> dict:
         if not self.config.get('enable_process', True):
             return {'success': False, 'error': 'Disabled', 'processes': []}
-        cmd = f'ps aux | grep -E "{filter_pattern}" | grep -v grep | head -n {limit}' if filter_pattern else f'ps aux | head -n {limit + 1}'
-        result = await self.run_shell(cmd)
-        if not result['success']:
-            return {'success': False, 'error': result.get('error'), 'processes': []}
-        processes = []
-        for line in result['stdout'].strip().split('\n'):
-            parts = line.split(None, 10)
-            if len(parts) >= 11:
-                processes.append({'user': parts[0], 'pid': parts[1], 'cpu': parts[2], 'mem': parts[3], 'command': parts[10]})
-        return {'success': True, 'processes': processes[:limit]}
+        
+        if IS_WINDOWS:
+            # Use Windows controller
+            if self._windows:
+                return await self._windows.list_processes(filter_pattern, limit)
+            return {'success': False, 'error': 'Windows controller not initialized', 'processes': []}
+        else:
+            # macOS/Linux
+            cmd = f'ps aux | grep -E "{filter_pattern}" | grep -v grep | head -n {limit}' if filter_pattern else f'ps aux | head -n {limit + 1}'
+            result = await self.run_shell(cmd)
+            if not result['success']:
+                return {'success': False, 'error': result.get('error'), 'processes': []}
+            processes = []
+            for line in result['stdout'].strip().split('\n'):
+                parts = line.split(None, 10)
+                if len(parts) >= 11:
+                    processes.append({'user': parts[0], 'pid': parts[1], 'cpu': parts[2], 'mem': parts[3], 'command': parts[10]})
+            return {'success': True, 'processes': processes[:limit]}
 
     async def kill_process(self, target: str, force: bool = False) -> dict:
         if not self.config.get('enable_process', True):
             return {'success': False, 'error': 'Disabled'}
-        cmd = f'kill -{"KILL" if force else "TERM"} {target}' if target.isdigit() else f'pkill -{"KILL" if force else "TERM"} "{target}"'
-        result = await self.run_shell(cmd)
-        return {'success': result['success'], 'message': f'Killed {target}' if result['success'] else result.get('error')}
+        
+        if IS_WINDOWS:
+            if self._windows:
+                return await self._windows.kill_process(target, force)
+            return {'success': False, 'error': 'Windows controller not initialized'}
+        else:
+            cmd = f'kill -{"KILL" if force else "TERM"} {target}' if target.isdigit() else f'pkill -{"KILL" if force else "TERM"} "{target}"'
+            result = await self.run_shell(cmd)
+            return {'success': result['success'], 'message': f'Killed {target}' if result['success'] else result.get('error')}
 
     async def list_directory(self, path: str = ".", show_hidden: bool = False) -> dict:
         if not self.config.get('enable_file', True):
@@ -270,38 +368,60 @@ class LangTARS(Command, BasePlugin):
     async def open_app(self, app_name: str | None = None, url: str | None = None) -> dict:
         if not self.config.get('enable_app', True):
             return {'success': False, 'error': 'Disabled'}
-        cmd = f'open "{url}"' if url else f'open -a "{app_name}"' if app_name else None
-        if not cmd:
-            return {'success': False, 'error': 'No target'}
-        result = await self.run_shell(cmd)
-        return {'success': result['success'], 'message': f'Opened {url or app_name}' if result['success'] else result.get('error')}
+        
+        if IS_WINDOWS:
+            if self._windows:
+                return await self._windows.open_app(app_name, url)
+            return {'success': False, 'error': 'Windows controller not initialized'}
+        else:
+            cmd = f'open "{url}"' if url else f'open -a "{app_name}"' if app_name else None
+            if not cmd:
+                return {'success': False, 'error': 'No target'}
+            result = await self.run_shell(cmd)
+            return {'success': result['success'], 'message': f'Opened {url or app_name}' if result['success'] else result.get('error')}
 
     async def close_app(self, app_name: str, force: bool = False) -> dict:
         if not self.config.get('enable_app', True):
             return {'success': False, 'error': 'Disabled'}
-        result = await self.run_shell(f'pkill -{"9" if force else "TERM"} "{app_name}"')
-        return {'success': result['success'], 'message': f'Closed {app_name}' if result['success'] else result.get('error')}
+        
+        if IS_WINDOWS:
+            if self._windows:
+                return await self._windows.close_app(app_name, force)
+            return {'success': False, 'error': 'Windows controller not initialized'}
+        else:
+            result = await self.run_shell(f'pkill -{"9" if force else "TERM"} "{app_name}"')
+            return {'success': result['success'], 'message': f'Closed {app_name}' if result['success'] else result.get('error')}
 
     async def list_apps(self, limit: int = 20) -> dict:
         if not self.config.get('enable_app', True):
             return {'success': False, 'error': 'Disabled', 'apps': []}
-        result = await self.run_shell(f"osascript -e 'tell app \"System Events\" to get name of every process' | tr ',' '\\n' | head -n {limit}")
-        if result['success']:
-            apps = [a.strip() for a in result['stdout'].strip().split('\n') if a.strip()]
-            return {'success': True, 'apps': apps, 'count': len(apps)}
-        return {'success': False, 'error': result.get('error'), 'apps': []}
+        
+        if IS_WINDOWS:
+            if self._windows:
+                return await self._windows.list_apps(limit)
+            return {'success': False, 'error': 'Windows controller not initialized', 'apps': []}
+        else:
+            result = await self.run_shell(f"osascript -e 'tell app \"System Events\" to get name of every process' | tr ',' '\\n' | head -n {limit}")
+            if result['success']:
+                apps = [a.strip() for a in result['stdout'].strip().split('\n') if a.strip()]
+                return {'success': True, 'apps': apps, 'count': len(apps)}
+            return {'success': False, 'error': result.get('error'), 'apps': []}
 
     async def get_system_info(self) -> dict:
-        import platform
-        try:
-            info = {'platform': platform.system(), 'platform_version': platform.version(), 'architecture': platform.architecture()[0],
-                   'processor': platform.processor(), 'hostname': platform.node(), 'python_version': platform.python_version()}
-            ur = await self.run_shell('uptime')
-            if ur['success']:
-                info['uptime'] = ur['stdout'].strip()
-            return {'success': True, 'info': info}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        if IS_WINDOWS:
+            if self._windows:
+                return await self._windows.get_system_info()
+            return {'success': False, 'error': 'Windows controller not initialized'}
+        else:
+            try:
+                info = {'platform': platform.system(), 'platform_version': platform.version(), 'architecture': platform.architecture()[0],
+                       'processor': platform.processor(), 'hostname': platform.node(), 'python_version': platform.python_version()}
+                ur = await self.run_shell('uptime')
+                if ur['success']:
+                    info['uptime'] = ur['stdout'].strip()
+                return {'success': True, 'info': info}
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
 
     async def search_files(self, pattern: str, path: str = ".", recursive: bool = True) -> dict:
         if not self.config.get('enable_file', True):
@@ -309,15 +429,26 @@ class LangTARS(Command, BasePlugin):
         sp = self._resolve_path(path)
         if not sp:
             return {'success': False, 'error': 'Access denied', 'files': []}
-        cmd = f'find "{sp}" -name "*{pattern}*" -type f 2>/dev/null | head -n 50' if recursive else f'ls "{sp}" | grep -i "*{pattern}*" | head -n 50'
-        result = await self.run_shell(cmd)
-        if result['success']:
-            files = [f.strip() for f in result['stdout'].strip().split('\n') if f.strip()]
-            return {'success': True, 'files': files, 'count': len(files)}
-        return {'success': False, 'error': result.get('error'), 'files': []}
+        
+        if IS_WINDOWS:
+            if self._windows:
+                return await self._windows.search_files(pattern, str(sp), recursive)
+            return {'success': False, 'error': 'Windows controller not initialized', 'files': []}
+        else:
+            cmd = f'find "{sp}" -name "*{pattern}*" -type f 2>/dev/null | head -n 50' if recursive else f'ls "{sp}" | grep -i "*{pattern}*" | head -n 50'
+            result = await self.run_shell(cmd)
+            if result['success']:
+                files = [f.strip() for f in result['stdout'].strip().split('\n') if f.strip()]
+                return {'success': True, 'files': files, 'count': len(files)}
+            return {'success': False, 'error': result.get('error'), 'files': []}
 
     async def run_applescript(self, script: str) -> dict:
+        """Execute AppleScript (macOS only)."""
         import tempfile, os
+        
+        if IS_WINDOWS:
+            return {'success': False, 'error': 'AppleScript is only available on macOS. Use PowerShell on Windows.'}
+        
         if not self.config.get('enable_applescript', True):
             return {'success': False, 'error': 'Disabled'}
         if not script:
@@ -336,6 +467,96 @@ class LangTARS(Command, BasePlugin):
             return {'success': False, 'error': result.get('stderr', result.get('error')), 'stdout': result.get('stdout')}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    # ========== Windows-specific Methods ==========
+
+    async def windows_send_keys(self, keys: str) -> dict:
+        """Send keystrokes to the active window (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.send_keys(keys)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_type_text(self, text: str) -> dict:
+        """Type text into the active window (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.type_text(text)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_press_key(self, key: str) -> dict:
+        """Press a special key (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.press_key(key)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_get_active_window(self) -> dict:
+        """Get information about the active window (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.get_active_window()
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_focus_window(self, title_or_process: str) -> dict:
+        """Focus a window by title or process name (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.focus_window(title_or_process)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_minimize_window(self, title_or_process: str | None = None) -> dict:
+        """Minimize a window (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.minimize_window(title_or_process)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_maximize_window(self, title_or_process: str | None = None) -> dict:
+        """Maximize a window (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.maximize_window(title_or_process)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_screenshot(self, path: str | None = None) -> dict:
+        """Take a screenshot (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.take_screenshot(path)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_get_clipboard(self) -> dict:
+        """Get clipboard content (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.get_clipboard()
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_set_clipboard(self, text: str) -> dict:
+        """Set clipboard content (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.set_clipboard(text)
+        return {'success': False, 'error': 'Windows controller not initialized'}
+
+    async def windows_show_notification(self, title: str, message: str) -> dict:
+        """Show a Windows toast notification (Windows only)."""
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'This method is only available on Windows'}
+        if self._windows:
+            return await self._windows.show_notification(title, message)
+        return {'success': False, 'error': 'Windows controller not initialized'}
 
     # ========== Browser/Safari/Chrome Delegates ==========
 
@@ -356,19 +577,134 @@ class LangTARS(Command, BasePlugin):
     async def browser_get_attribute(self, s, a): return await self._browser.get_attribute(s, a) if self._browser else {'success': False}
     async def browser_cleanup(self): return await self._browser.cleanup() if self._browser else {'success': True}
 
-    async def safari_open(self, u=None): return await self._safari.open(u) if self._safari else {'success': False}
-    async def safari_navigate(self, u): return await self._safari.navigate(u) if self._safari else {'success': False}
-    async def safari_get_content(self): return await self._safari.get_content() if self._safari else {'success': False}
-    async def safari_click(self, s): return await self._safari.click(s) if self._safari else {'success': False}
-    async def safari_type(self, s, t): return await self._safari.type(s, t) if self._safari else {'success': False}
-    async def safari_press_key(self, k): return await self._safari.press_key(k) if self._safari else {'success': False}
+    # macOS Safari delegates
+    async def safari_open(self, u=None): 
+        if not IS_MACOS:
+            return {'success': False, 'error': 'Safari is only available on macOS'}
+        return await self._safari.open(u) if self._safari else {'success': False}
+    async def safari_navigate(self, u): 
+        if not IS_MACOS:
+            return {'success': False, 'error': 'Safari is only available on macOS'}
+        return await self._safari.navigate(u) if self._safari else {'success': False}
+    async def safari_get_content(self): 
+        if not IS_MACOS:
+            return {'success': False, 'error': 'Safari is only available on macOS'}
+        return await self._safari.get_content() if self._safari else {'success': False}
+    async def safari_click(self, s): 
+        if not IS_MACOS:
+            return {'success': False, 'error': 'Safari is only available on macOS'}
+        return await self._safari.click(s) if self._safari else {'success': False}
+    async def safari_type(self, s, t): 
+        if not IS_MACOS:
+            return {'success': False, 'error': 'Safari is only available on macOS'}
+        return await self._safari.type(s, t) if self._safari else {'success': False}
+    async def safari_press_key(self, k): 
+        if not IS_MACOS:
+            return {'success': False, 'error': 'Safari is only available on macOS'}
+        return await self._safari.press_key(k) if self._safari else {'success': False}
 
-    async def chrome_open(self, u=None): return await self._chrome.open(u) if self._chrome else {'success': False}
-    async def chrome_navigate(self, u): return await self._chrome.navigate(u) if self._chrome else {'success': False}
-    async def chrome_get_content(self): return await self._chrome.get_content() if self._chrome else {'success': False}
-    async def chrome_click(self, s): return await self._chrome.click(s) if self._chrome else {'success': False}
-    async def chrome_type(self, s, t): return await self._chrome.type(s, t) if self._chrome else {'success': False}
-    async def chrome_press_key(self, k): return await self._chrome.press_key(k) if self._chrome else {'success': False}
+    # Chrome delegates (cross-platform)
+    async def chrome_open(self, u=None): 
+        if IS_MACOS:
+            return await self._chrome.open(u) if self._chrome else {'success': False}
+        elif IS_WINDOWS:
+            return await self._chrome_win.open(u) if self._chrome_win else {'success': False}
+        return {'success': False, 'error': 'Unsupported platform'}
+    
+    async def chrome_navigate(self, u): 
+        if IS_MACOS:
+            return await self._chrome.navigate(u) if self._chrome else {'success': False}
+        elif IS_WINDOWS:
+            return await self._chrome_win.navigate(u) if self._chrome_win else {'success': False}
+        return {'success': False, 'error': 'Unsupported platform'}
+    
+    async def chrome_get_content(self): 
+        if IS_MACOS:
+            return await self._chrome.get_content() if self._chrome else {'success': False}
+        elif IS_WINDOWS:
+            return await self._chrome_win.get_content() if self._chrome_win else {'success': False}
+        return {'success': False, 'error': 'Unsupported platform'}
+    
+    async def chrome_click(self, s): 
+        if IS_MACOS:
+            return await self._chrome.click(s) if self._chrome else {'success': False}
+        elif IS_WINDOWS:
+            return await self._chrome_win.click(s) if self._chrome_win else {'success': False}
+        return {'success': False, 'error': 'Unsupported platform'}
+    
+    async def chrome_type(self, s, t): 
+        if IS_MACOS:
+            return await self._chrome.type(s, t) if self._chrome else {'success': False}
+        elif IS_WINDOWS:
+            return await self._chrome_win.type(s, t) if self._chrome_win else {'success': False}
+        return {'success': False, 'error': 'Unsupported platform'}
+    
+    async def chrome_press_key(self, k): 
+        if IS_MACOS:
+            return await self._chrome.press_key(k) if self._chrome else {'success': False}
+        elif IS_WINDOWS:
+            return await self._chrome_win.press_key(k) if self._chrome_win else {'success': False}
+        return {'success': False, 'error': 'Unsupported platform'}
+
+    # Windows Edge delegates
+    async def edge_open(self, u=None):
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'Edge native control is only available on Windows'}
+        return await self._edge.open(u) if self._edge else {'success': False}
+    
+    async def edge_navigate(self, u):
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'Edge native control is only available on Windows'}
+        return await self._edge.navigate(u) if self._edge else {'success': False}
+    
+    async def edge_get_content(self):
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'Edge native control is only available on Windows'}
+        return await self._edge.get_content() if self._edge else {'success': False}
+    
+    async def edge_search(self, query: str):
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'Edge native control is only available on Windows'}
+        return await self._edge.search(query) if self._edge else {'success': False}
+    
+    async def edge_press_key(self, k):
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'Edge native control is only available on Windows'}
+        return await self._edge.press_key(k) if self._edge else {'success': False}
+    
+    async def edge_focus_and_type(self, text: str):
+        if not IS_WINDOWS:
+            return {'success': False, 'error': 'Edge native control is only available on Windows'}
+        return await self._edge.focus_and_type(text) if self._edge else {'success': False}
+
+    # ========== Permission Check ==========
+
+    async def check_permissions(self) -> dict:
+        """Check if required permissions are granted."""
+        if IS_MACOS:
+            result = await self.run_shell('osascript -e "tell application \\"System Events\\" to return name of first process"')
+            if result['success']:
+                return {'success': True, 'message': 'Accessibility permissions granted'}
+            return {'success': False, 'error': 'Accessibility permissions not granted', 'instructions': self.get_permission_instructions()}
+        elif IS_WINDOWS:
+            return {'success': True, 'message': 'No special permissions required on Windows'}
+        return {'success': False, 'error': 'Unsupported platform'}
+
+    def get_permission_instructions(self) -> str:
+        """Get instructions for granting permissions."""
+        if IS_MACOS:
+            return """To grant accessibility permissions on macOS:
+1. Open System Preferences > Security & Privacy > Privacy
+2. Select "Accessibility" from the left sidebar
+3. Click the lock icon to make changes
+4. Add your terminal application (Terminal, iTerm, etc.)
+5. Restart the application"""
+        elif IS_WINDOWS:
+            return """Most operations on Windows don't require special permissions.
+For some operations, you may need to:
+1. Run as Administrator for system-level changes
+2. Allow PowerShell script execution: Set-ExecutionPolicy RemoteSigned"""
+        return "Unsupported platform"
 
     # ========== Commands ==========
 
@@ -379,4 +715,8 @@ class LangTARS(Command, BasePlugin):
             self._save_config_to_file(self.config)
             return CommandReturn(text=f"Saved to {self._get_config_file_path()}")
         keys = ['enable_shell', 'enable_process', 'enable_file', 'enable_app', 'planner_max_iterations', 'workspace_path']
-        return CommandReturn(text="\n".join(f"{k}: {self.config.get(k)}" for k in keys))
+        if IS_WINDOWS:
+            keys.append('enable_powershell')
+        else:
+            keys.append('enable_applescript')
+        return CommandReturn(text=f"Platform: {self._platform}\n" + "\n".join(f"{k}: {self.config.get(k)}" for k in keys))

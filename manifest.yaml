@@ -4,10 +4,10 @@ metadata:
   author: wangcham
   name: LangTARS
   repository: 'https://github.com/langbot-app/LangTARS'
-  version: 0.2.0
+  version: 0.2.1
   description:
-    en_US: '(Testing) Native Claw-like Plugin - Control your Mac through IM messages using autonomous AI planning (inspired by ReAct, OpenClaw-style, like TARS from Interstellar)'
-    zh_Hans: '(测试中) 原生类OpenClaw插件 - 通过 IM 消息使用自主 AI 规划能力控制您的 Mac（参考ReAct 理念，如《星际穿越》中的塔斯为你忠诚工作）'
+    en_US: '(Testing) Native Claw-like Plugin - Control your Mac/Windows through IM messages using autonomous AI planning (inspired by ReAct, OpenClaw-style, like TARS from Interstellar)'
+    zh_Hans: '(测试中) 原生类OpenClaw插件 - 通过 IM 消息使用自主 AI 规划能力控制您的 Mac/Windows（参考ReAct 理念，如《星际穿越》中的塔斯为你忠诚工作）'
   label:
     en_US: LangTARS
     zh_Hans: LangTARS
@@ -21,8 +21,8 @@ spec:
         en_US: Allowed Users
         zh_Hans: 允许的用户
       description:
-        en_US: 'List of user IDs allowed to control this Mac'
-        zh_Hans: '允许控制此 Mac 的用户 ID 列表'
+        en_US: 'List of user IDs allowed to control this computer'
+        zh_Hans: '允许控制此计算机的用户 ID 列表'
       default: []
     - name: command_whitelist
       type: array[string]
@@ -118,11 +118,21 @@ spec:
       type: boolean
       required: false
       label:
-        en_US: Enable AppleScript
-        zh_Hans: 启用 AppleScript
+        en_US: Enable AppleScript (macOS)
+        zh_Hans: 启用 AppleScript (macOS)
       description:
-        en_US: 'Enable AppleScript execution for UI automation'
-        zh_Hans: '启用 AppleScript 执行以进行 UI 自动化'
+        en_US: 'Enable AppleScript execution for UI automation (macOS only)'
+        zh_Hans: '启用 AppleScript 执行以进行 UI 自动化（仅 macOS）'
+      default: true
+    - name: enable_powershell
+      type: boolean
+      required: false
+      label:
+        en_US: Enable PowerShell (Windows)
+        zh_Hans: 启用 PowerShell (Windows)
+      description:
+        en_US: 'Enable PowerShell execution for UI automation (Windows only)'
+        zh_Hans: '启用 PowerShell 执行以进行 UI 自动化（仅 Windows）'
       default: true
     - name: planner_auto_load_mcp
       type: boolean
