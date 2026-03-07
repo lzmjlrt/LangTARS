@@ -46,6 +46,10 @@ class BackgroundTaskManager:
     
     # User's new instruction when denying confirmation
     _user_new_instruction: str | None = None
+    
+    # Generic interactive Q&A state (non-danger confirmation)
+    _pending_question: dict | None = None
+    _question_callback: asyncio.Future | None = None
 
     @classmethod
     def is_running(cls) -> bool:
@@ -123,6 +127,8 @@ class BackgroundTaskManager:
         cls._llm_call_count = 0
         cls._pending_confirmation = None
         cls._confirmation_callback = None
+        cls._pending_question = None
+        cls._question_callback = None
 
     @classmethod
     def request_confirmation(cls, tool_name: str, arguments: dict, message: str) -> asyncio.Future:
@@ -173,6 +179,44 @@ class BackgroundTaskManager:
         cls._user_new_instruction = None
 
     @classmethod
+    def request_user_input(cls, question: str, options: list[str] | None = None, message: str = "") -> asyncio.Future:
+        """Request generic user input and return a future resolved by `!tars <answer>`."""
+        cls._pending_question = {
+            "question": question,
+            "options": options or [],
+            "message": message,
+        }
+        cls._question_callback = asyncio.Future()
+        return cls._question_callback
+
+    @classmethod
+    def submit_user_input(cls, answer: str) -> bool:
+        """Submit answer for pending generic user question."""
+        if cls._question_callback and not cls._question_callback.done():
+            cls._question_callback.set_result(answer)
+            cls._pending_question = None
+            return True
+        return False
+
+    @classmethod
+    def clear_pending_user_input(cls) -> None:
+        """Clear pending user question state."""
+        if cls._question_callback and not cls._question_callback.done():
+            cls._question_callback.cancel()
+        cls._question_callback = None
+        cls._pending_question = None
+
+    @classmethod
+    def get_pending_user_question(cls) -> dict | None:
+        """Get pending generic user question."""
+        return cls._pending_question
+
+    @classmethod
+    def has_pending_user_question(cls) -> bool:
+        """Check if there's a pending generic user question."""
+        return cls._pending_question is not None
+
+    @classmethod
     def set_message_context(cls, bot_uuid: str, target_type: str, target_id: Any) -> None:
         """Set the message sending context for confirmation notifications."""
         cls._bot_uuid = bot_uuid
@@ -205,6 +249,8 @@ class BackgroundTaskManager:
         await cls.stop()
         # Clear confirmation state
         cls.confirm(False)
+        # Clear generic question state
+        cls.clear_pending_user_input()
 
 
 class LangTARS(Command):
@@ -318,6 +364,13 @@ class LangTARS(Command):
             aliases=["other!", "换个任务", "新任务", "改变任务"],
         )
 
+        self.registered_subcommands["help"] = Subcommand(
+            subcommand=LanTARSCommand.help,
+            help="Show command help",
+            usage="!tars help",
+            aliases=["h", "?", "帮助"],
+        )
+
         self.registered_subcommands["top"] = Subcommand(
             subcommand=LanTARSCommand.top,
             help="Show running applications",
@@ -369,6 +422,37 @@ class LangTARS(Command):
 # Separate class for command handlers - uses singleton PluginHelper
 class LanTARSCommand:
     """Static command handlers that delegate to shared PluginHelper."""
+
+    @staticmethod
+    def _help_text() -> str:
+        return """LangTARS - 命令大全
+
+核心命令:
+  !tars auto <任务>         - AI 自主执行任务
+  !tars stop               - 停止当前任务
+  !tars what               - 查看当前进度/是否在等待确认
+  !tars result             - 查看最近任务结果
+  !tars logs [行数]        - 查看日志
+
+交互命令:
+  !tars yes                - 确认危险操作
+  !tars no                 - 取消危险操作并停止任务
+  !tars other <新指令>      - 放弃当前危险操作并改做新任务
+  !tars <你的回答>          - 回答插件提出的问题（例如二选一）
+
+系统命令:
+  !tars shell <命令>        - 执行 shell 命令
+  !tars ps [filter]        - 列进程
+  !tars kill <pid|name>    - 结束进程
+  !tars ls [path]          - 列目录
+  !tars cat <path>         - 读文件
+  !tars write <path> <txt> - 写文件
+  !tars search <pattern>   - 搜文件
+  !tars open <app|url>     - 打开应用或网址
+  !tars close <app>        - 关闭应用
+  !tars apps               - 列运行中的应用
+  !tars info               - 查看系统信息
+"""
 
     @staticmethod
     async def shell(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
@@ -675,6 +759,16 @@ class LanTARSCommand:
     async def what(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
         """Get current task status - what is the agent doing now."""
         status = BackgroundTaskManager.get_task_status()
+        if BackgroundTaskManager.has_pending_user_question():
+            pending_q = BackgroundTaskManager.get_pending_user_question() or {}
+            msg = "🤔 插件正在等你回答:\n\n"
+            msg += f"问题: {pending_q.get('question', '')}\n"
+            options = pending_q.get("options", []) or []
+            if options:
+                msg += "可选项: " + " / ".join(str(x) for x in options) + "\n"
+            msg += "\n请回复: !tars <你的回答>"
+            yield CommandReturn(text=msg)
+            return
         
         # Check if there's a pending confirmation
         if BackgroundTaskManager.has_pending_confirmation():
@@ -849,36 +943,33 @@ class LanTARSCommand:
 
     @staticmethod
     async def default(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
-        """Handle default case - show help."""
-        help_text = """LangTARS - Control your Mac through IM messages
+        """Handle default case: answer pending question, otherwise show help."""
+        answer = " ".join(context.crt_params).strip() if context.crt_params else ""
 
-Available commands:
-  !tars shell <command>   - Execute shell command
-  !tars ps [filter]       - List running processes
-  !tars kill <pid|name>   - Kill a process
-  !tars ls [path]         - List directory contents
-  !tars cat <path>        - Read file content
-  !tars write <path> <content> - Write file
-  !tars open <app|url>   - Open an application or URL
-  !tars close <app>      - Close an application
-  !tars top              - List running applications
-  !tars logs [lines]     - View recent logs
-  !tars result           - Get last auto task result
-  !tars info             - Show system information
-  !tars search <pattern> - Search files
-  !tars auto <task>      - Autonomous task planning (AI-powered)
+        if BackgroundTaskManager.has_pending_user_question():
+            if not answer:
+                pending_q = BackgroundTaskManager.get_pending_user_question() or {}
+                msg = "🤔 插件正在等你回答:\n\n"
+                msg += f"问题: {pending_q.get('question', '')}\n"
+                options = pending_q.get("options", []) or []
+                if options:
+                    msg += "可选项: " + " / ".join(str(x) for x in options) + "\n"
+                msg += "\n请回复: !tars <你的回答>"
+                yield CommandReturn(text=msg)
+                return
 
-To stop a running task, run in terminal:
-  touch /tmp/langtars_user_stop
+            if BackgroundTaskManager.submit_user_input(answer):
+                yield CommandReturn(text=f"✅ 已收到你的回答：{answer}")
+            else:
+                yield CommandReturn(text="⚠️ 当前没有可接收回答的问题。")
+            return
 
-Examples:
-  !tars info
-  !tars shell ls -la
-  !tars ps python
-  !tars open Safari
-  !tars auto Open Safari and search for AI news
-"""
-        yield CommandReturn(text=help_text)
+        yield CommandReturn(text=LanTARSCommand._help_text())
+
+    @staticmethod
+    async def help(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
+        """Show explicit help command."""
+        yield CommandReturn(text=LanTARSCommand._help_text())
 
     @staticmethod
     async def auto(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
@@ -1134,7 +1225,8 @@ Go to Pipelines → Configure → Select LLM Model
                     await _auto_execute_result_reply()
                 finally:
                     SubprocessPlanner._remove_run_file()
-                    await _cleanup_browser("run_task.finally")
+                    if bool(config.get("auto_cleanup_browser_on_finish", False)):
+                        await _cleanup_browser("run_task.finally")
                     BackgroundTaskManager._task_running = False
                     BackgroundTaskManager._current_step = "任务已完成"
 
@@ -1164,7 +1256,8 @@ Go to Pipelines → Configure → Select LLM Model
                     await _reply_background(f"❌ Task error:\n{BackgroundTaskManager._last_result}")
                     await _auto_execute_result_reply()
                 finally:
-                    await _cleanup_browser("run_subprocess_task.finally")
+                    if bool(config.get("auto_cleanup_browser_on_finish", False)):
+                        await _cleanup_browser("run_subprocess_task.finally")
                     BackgroundTaskManager._task_running = False
                     BackgroundTaskManager._current_step = "任务已完成"
 
