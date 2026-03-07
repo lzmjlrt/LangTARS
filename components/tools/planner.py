@@ -1336,6 +1336,10 @@ class PlannerExecutor:
             content=user_message
         ))
 
+        # 无效响应计数器，防止无限循环
+        invalid_response_count = 0
+        max_invalid_responses = 5  # 连续5次无效响应后终止
+
         # ReAct loop with streaming
         for iteration in range(max_iterations):
             # Yield control to event loop to allow other commands to be processed
@@ -1419,15 +1423,30 @@ class PlannerExecutor:
 
                     if content_str.strip().upper().startswith("WORKING:"):
                         logger.warning(f"[{iteration+1}] 工作中: {content_str[8:].strip()}")
+                        invalid_response_count = 0  # 重置无效响应计数
                         messages.append(provider_message.Message(
                             role="user",
                             content=f"继续执行任务。{content_str[8:]}"
                         ))
                         continue
 
+                    # Check if LLM indicates it needs a skill or encountered an error
+                    if content_str.strip().upper().startswith("NEED_SKILL:"):
+                        skill_needed = content_str[11:].strip()
+                        logger.warning(f"[{iteration+1}] 需要技能或遇到错误: {skill_needed}")
+                        # 如果是网络错误或无法完成的任务，直接返回结果
+                        if any(keyword in skill_needed.lower() for keyword in ['无法连接', '网络', 'error', 'failed', '失败', '超时', 'timeout']):
+                            logger.warning(f"[{iteration+1}] 检测到错误状态，任务结束")
+                            yield f"任务无法完成: {skill_needed}"
+                            return
+                        # 否则提示用户需要安装技能
+                        yield f"需要安装技能: {skill_needed}"
+                        return
+
                     # Try parse JSON
                     tool_call = self._parse_tool_call_from_content(content_str)
                     if tool_call:
+                        invalid_response_count = 0  # 重置无效响应计数
                         tool_name = tool_call.get('tool', 'unknown')
                         logger.warning(f"[{iteration+1}] 调用工具: {tool_name}")
                         result = await self._execute_tool(
@@ -1449,9 +1468,31 @@ class PlannerExecutor:
                             )
                         )
                         continue
+                    else:
+                        # 无法识别的响应格式，提示 LLM 重新格式化
+                        invalid_response_count += 1
+                        logger.warning(f"[{iteration+1}] 无法识别的响应格式 ({invalid_response_count}/{max_invalid_responses})，要求重新回复")
+                        
+                        # 如果连续多次无效响应，终止任务
+                        if invalid_response_count >= max_invalid_responses:
+                            logger.warning(f"[{iteration+1}] 连续 {max_invalid_responses} 次无效响应，任务终止")
+                            yield f"任务无法完成: LLM 连续返回无效响应格式。最后的响应: {content_str[:200]}"
+                            return
+                        
+                        messages.append(provider_message.Message(
+                            role="user",
+                            content=f"你的回复格式不正确。请严格按照以下格式之一回复：\n"
+                                    f"1. 如果任务完成：DONE: 结果总结\n"
+                                    f"2. 如果需要继续工作：WORKING: 下一步计划\n"
+                                    f"3. 如果需要调用工具：{{\"tool\": \"工具名\", \"arguments\": {{...}}}}\n"
+                                    f"4. 如果遇到错误无法继续：NEED_SKILL: 错误描述\n\n"
+                                    f"你之前的回复是：{content_str[:200]}"
+                        ))
+                        continue
 
                 # Handle tool_calls
                 if response.tool_calls:
+                    invalid_response_count = 0  # 重置无效响应计数
                     for tool_call in response.tool_calls:
                         tool_name = tool_call.function.name if hasattr(tool_call, 'function') else 'unknown'
                         logger.warning(f"[{iteration+1}] 调用工具: {tool_name}")
@@ -1481,6 +1522,26 @@ class PlannerExecutor:
                                 content=f"工具执行结果：{json.dumps(result)[:500]}\n\n请立即判断任务是否已完成：\n- 如果工具已成功执行 → 必须返回 DONE: 执行结果总结\n- 如果还需要获取页面内容 → 返回 WORKING: 需要做什么，然后调用获取内容的工具\n- 如果需要调用工具 → 返回 JSON 格式"
                             )
                         )
+
+            # 如果响应既没有有效的 content 也没有 tool_calls，这是异常情况
+            if not response.content and not response.tool_calls:
+                invalid_response_count += 1
+                logger.warning(f"[{iteration+1}] LLM 返回空响应 ({invalid_response_count}/{max_invalid_responses})，要求重新回复")
+                
+                # 如果连续多次空响应，终止任务
+                if invalid_response_count >= max_invalid_responses:
+                    logger.warning(f"[{iteration+1}] 连续 {max_invalid_responses} 次空响应，任务终止")
+                    yield f"任务无法完成: LLM 连续返回空响应"
+                    return
+                
+                messages.append(provider_message.Message(
+                    role="user",
+                    content="你的回复为空。请重新回复，按照以下格式之一：\n"
+                            "1. 如果任务完成：DONE: 结果总结\n"
+                            "2. 如果需要继续工作：WORKING: 下一步计划\n"
+                            "3. 如果需要调用工具：{\"tool\": \"工具名\", \"arguments\": {...}}\n"
+                            "4. 如果遇到错误无法继续：NEED_SKILL: 错误描述"
+                ))
 
         yield f"Max iterations ({max_iterations}) reached. Task incomplete."
 
@@ -1540,15 +1601,44 @@ class PlannerExecutor:
             logger.debug(f"Failed to update task status: {e}")
 
         # Check if this is a dangerous operation that needs confirmation
-        dangerous_tools = ['shell', 'kill_process', 'applescript', 'delete_file', 'rm', 'run_command']
-        needs_confirmation = tool_name in dangerous_tools
+        # 只有真正危险的命令才需要确认，普通命令如 cat, ls, echo 等不需要
+        needs_confirmation = False
         
-        # Additional check: shell with potentially dangerous commands
-        if tool_name == 'shell' and arguments.get('command', ''):
+        # 只有特定的危险工具需要确认
+        if tool_name in ['kill_process']:
+            needs_confirmation = True
+        
+        # shell 命令只有包含危险模式时才需要确认
+        if tool_name in ['shell', 'run_command'] and arguments.get('command', ''):
             cmd = arguments['command'].lower()
-            dangerous_patterns = ['rm -rf', 'rm -r', 'rm -f', 'dd ', 'mkfs', '> /dev/', 'chmod 777', 'chown']
+            # 真正危险的命令模式
+            dangerous_patterns = [
+                # 删除命令
+                'rm -rf', 'rm -r', 'rm -f', 'rmdir', 'del /f', 'del /s', 'rd /s',
+                # 磁盘操作
+                'dd ', 'mkfs', 'format ', 'diskpart', 'fdisk',
+                # 系统关键操作
+                'reboot', 'shutdown', 'poweroff', 'halt', 'init 0', 'init 6',
+                # 权限修改
+                'chmod 777', 'chown', 'chgrp',
+                # 危险重定向
+                '> /dev/', '>/dev/',
+                # Windows 危险命令
+                'bcdedit', 'reg delete', 'taskkill /f',
+            ]
             if any(p in cmd for p in dangerous_patterns):
                 needs_confirmation = True
+        
+        # applescript 只有包含危险操作时才需要确认
+        if tool_name == 'applescript' and arguments.get('script', ''):
+            script = arguments['script'].lower()
+            dangerous_patterns = ['do shell script "rm', 'do shell script "sudo', 'shutdown', 'reboot']
+            if any(p in script for p in dangerous_patterns):
+                needs_confirmation = True
+        
+        # delete_file 工具需要确认
+        if tool_name in ['delete_file', 'rm']:
+            needs_confirmation = True
 
         # If confirmation needed, wait for user response
         if needs_confirmation:

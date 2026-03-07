@@ -115,18 +115,27 @@ AI 將：
 !tars result
 ```
 
+## 任務控制命令
+
+| 命令 | 描述 |
+|------|------|
+| `!tars stop` | 停止當前正在執行的任務 |
+| `!tars status` | 查看當前任務狀態 |
+| `!tars what` | 查看 agent 當前正在做什麼 |
+| `!tars yes` | 確認危險操作（如 rm、reboot 等） |
+| `!tars no` | 取消並停止危險操作 |
+| `!tars other <新指令>` | **中斷當前任務**並提供新指令 |
+| `!tars logs [lines]` | 查看外掛日誌（最近 N 行） |
+| `!tars result` | 取得最近一次 auto 任務結果 |
+
+> 💡 **提示**：`!tars other` 可以在任務執行過程中隨時使用，用於中斷當前任務並執行新的指令。
+
 ## 測試命令
 
 這些命令可用於測試和直接控制：
 
 | 命令 | 描述 |
 |------|------|
-| `!tars what` | 查看 agent 當前正在做什麼 |
-| `!tars yes` | 確認危險操作 |
-| `!tars no` | 取消並停止危險操作 |
-| `!tars other <新指令>` | 提供新指令而不是確認 |
-| `!tars logs [lines]` | 查看外掛日誌（最近 N 行） |
-| `!tars result` | 取得最近一次 auto 任務結果 |
 | `!tars shell <command>` | 執行 shell 命令 |
 | `!tars ps [filter]` | 列出執行中的程序 |
 | `!tars kill <pid\|name>` | 終止程序 |

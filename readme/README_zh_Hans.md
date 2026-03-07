@@ -116,18 +116,27 @@ AI 将：
 !tars result
 ```
 
+## 任务控制命令
+
+| 命令 | 描述 |
+|------|------|
+| `!tars stop` | 停止当前正在运行的任务 |
+| `!tars status` | 查看当前任务状态 |
+| `!tars what` | 查看 agent 当前正在做什么 |
+| `!tars yes` | 确认危险操作（如 rm、reboot 等） |
+| `!tars no` | 取消并停止危险操作 |
+| `!tars other <新指令>` | **中断当前任务**并提供新指令 |
+| `!tars logs [lines]` | 查看插件日志（最近 N 行） |
+| `!tars result` | 获取最近一次 auto 任务结果 |
+
+> 💡 **提示**：`!tars other` 可以在任务执行过程中随时使用，用于中断当前任务并执行新的指令。
+
 ## 测试命令
 
 这些命令可用于测试和直接控制：
 
 | 命令 | 描述 |
 |------|------|
-| `!tars what` | 查看 agent 当前正在做什么 |
-| `!tars yes` | 确认危险操作 |
-| `!tars no` | 取消并停止危险操作 |
-| `!tars other <新指令>` | 提供新指令而不是确认 |
-| `!tars logs [lines]` | 查看插件日志（最近 N 行） |
-| `!tars result` | 获取最近一次 auto 任务结果 |
 | `!tars shell <command>` | 执行 shell 命令 |
 | `!tars ps [filter]` | 列出运行中的进程 |
 | `!tars kill <pid\|name>` | 终止进程 |

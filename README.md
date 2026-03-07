@@ -97,6 +97,21 @@ Get the last auto task result:
 !tars result
 ```
 
+## Task Control Commands
+
+| Command | Description |
+|---------|-------------|
+| `!tars stop` | Stop the currently running task |
+| `!tars status` | View current task status |
+| `!tars what` | What is the agent doing now |
+| `!tars yes` | Confirm dangerous operation (e.g., rm, reboot) |
+| `!tars no` | Cancel and stop dangerous operation |
+| `!tars other <instruction>` | **Interrupt current task** and provide new instruction |
+| `!tars logs [lines]` | View plugin logs (latest N lines) |
+| `!tars result` | Get last auto task result |
+
+> 💡 **Tip**: `!tars other` can be used at any time during task execution to interrupt the current task and execute a new instruction.
+
 ## Testing Commands
 
 These commands are available for testing and direct control:
@@ -104,12 +119,6 @@ These commands are available for testing and direct control:
 | Command | Description |
 |---------|-------------|
 | `!tars auto <task>` | Autonomous task planning (AI-powered) |
-| `!tars what` | What is the agent doing now |
-| `!tars yes` | Confirm dangerous operation |
-| `!tars no` | Cancel and stop dangerous operation |
-| `!tars other <instruction>` | Provide new instruction instead of confirming |
-| `!tars logs [lines]` | View plugin logs (latest N lines) |
-| `!tars result` | Get last auto task result |
 | `!tars shell <command>` | Execute a shell command |
 | `!tars ps [filter]` | List running processes |
 | `!tars kill <pid\|name>` | Kill a process |

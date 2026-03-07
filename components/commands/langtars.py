@@ -748,13 +748,10 @@ class LanTARSCommand:
 
     @staticmethod
     async def other(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
-        """Handle user providing a new instruction instead of confirming dangerous operation."""
-        params = context.crt_params
+        """Handle user providing a new instruction - can interrupt running task or replace pending confirmation."""
+        from components.tools.planner import TrueSubprocessPlanner
         
-        # Check if there's a pending confirmation
-        if not BackgroundTaskManager.has_pending_confirmation():
-            yield CommandReturn(text="ℹ️ 当前没有待确认的危险操作。")
-            return
+        params = context.crt_params
         
         if not params:
             yield CommandReturn(text="请提供新的指令。例如：!tars other 我要查天气")
@@ -763,10 +760,26 @@ class LanTARSCommand:
         # Get the new instruction from params
         new_instruction = " ".join(params)
         
-        # Set the new instruction
-        BackgroundTaskManager.set_user_new_instruction(new_instruction)
+        # Check if there's a pending confirmation - handle it
+        if BackgroundTaskManager.has_pending_confirmation():
+            # Set the new instruction and cancel confirmation
+            BackgroundTaskManager.set_user_new_instruction(new_instruction)
+            yield CommandReturn(text=f"✅ 已收到新指令：{new_instruction}\n\n正在停止当前任务并开始新任务...")
+            return
         
-        yield CommandReturn(text=f"✅ 已收到新指令：{new_instruction}\n\n正在停止当前任务并开始新任务...")
+        # Check if there's a running task - stop it and start new one
+        if BackgroundTaskManager.is_running() or TrueSubprocessPlanner.is_running():
+            # Stop the current task
+            await BackgroundTaskManager.stop()
+            
+            # Store the new instruction for later execution
+            BackgroundTaskManager.set_user_new_instruction(new_instruction)
+            
+            yield CommandReturn(text=f"✅ 已停止当前任务，收到新指令：{new_instruction}\n\n请使用 !tars do {new_instruction} 来执行新任务。")
+            return
+        
+        # No task running, just inform user to use !tars do
+        yield CommandReturn(text=f"ℹ️ 当前没有正在执行的任务。\n\n请使用 !tars do {new_instruction} 来执行任务。")
 
     @staticmethod
     async def top(_self_cmd: Command, context: ExecuteContext) -> AsyncGenerator[CommandReturn, None]:
