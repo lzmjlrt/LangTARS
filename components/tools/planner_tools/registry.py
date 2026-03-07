@@ -15,6 +15,7 @@ from .system import (
     CloseAppTool,
     ListAppsTool,
     GetSystemInfoTool,
+    AskUserTool,
     AppleScriptTool,
     PowerShellTool,
     WindowsSendKeysTool,
@@ -83,6 +84,7 @@ BUILTIN_TOOLS: list[type[BasePlannerTool]] = [
     CloseAppTool,
     ListAppsTool,
     GetSystemInfoTool,
+    AskUserTool,
     # File tools
     ReadFileTool,
     WriteFileTool,

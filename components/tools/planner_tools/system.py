@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import platform
 from typing import Any
 
@@ -480,3 +481,86 @@ class WindowsScreenshotTool(BasePlannerTool):
             return {"success": False, "error": "This tool is only available on Windows."}
         
         return await helper_plugin.windows_screenshot(arguments.get('path'))
+
+
+class AskUserTool(BasePlannerTool):
+    """Ask user a clarifying question and wait for response."""
+
+    @property
+    def name(self) -> str:
+        return "ask_user"
+
+    @property
+    def description(self) -> str:
+        return "Ask the user a clarifying question when the task is ambiguous; wait for user's answer from chat."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "Question to ask user"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional candidate options (e.g. [\"A\", \"B\"])"
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": "How many seconds to wait for user reply (default: 180)",
+                    "default": 180
+                }
+            },
+            "required": ["question"]
+        }
+
+    async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+        from components.commands.langtars import BackgroundTaskManager
+
+        question = str(arguments.get("question", "")).strip()
+        options = arguments.get("options", []) or []
+        timeout_seconds = float(arguments.get("timeout_seconds", 180) or 180)
+
+        if not question:
+            return {"success": False, "error": "Question is required"}
+
+        ask_msg = "🤔 需要你确认一个问题\n\n"
+        ask_msg += f"问题: {question}\n"
+        if options:
+            ask_msg += "可选项: " + " / ".join(str(x) for x in options) + "\n"
+        ask_msg += "\n请回复: !tars <你的回答>"
+
+        try:
+            # Try to resolve plugin instance from helper object
+            if hasattr(helper_plugin, "plugin") and helper_plugin.plugin:
+                plugin_instance = helper_plugin.plugin
+            elif hasattr(helper_plugin, "_plugin"):
+                plugin_instance = helper_plugin._plugin
+            else:
+                plugin_instance = helper_plugin
+
+            await BackgroundTaskManager.send_confirmation_message(ask_msg, plugin_instance)
+        except Exception:
+            # If send fails, continue waiting; user can still query via !tars what.
+            pass
+
+        future = BackgroundTaskManager.request_user_input(
+            question=question,
+            options=[str(x) for x in options],
+            message=ask_msg
+        )
+
+        try:
+            answer = await asyncio.wait_for(future, timeout=timeout_seconds)
+            return {
+                "success": True,
+                "question": question,
+                "answer": str(answer),
+                "options": [str(x) for x in options],
+            }
+        except asyncio.TimeoutError:
+            BackgroundTaskManager.clear_pending_user_input()
+            return {"success": False, "error": "等待用户回答超时"}

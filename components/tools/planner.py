@@ -205,6 +205,11 @@ DONE: 北京今天天气晴朗，气温15°C，湿度45%。
 User: "Task complete, show result"
 Response: DONE: Successfully completed the task...
 
+User: "Open one of two possible websites but not sure which one"
+Response: {"tool": "ask_user", "arguments": {"question": "你想打开哪一个？", "options": ["A", "B"]}}
+# Tool result: {"success": true, "answer": "..."}
+# Then continue with the chosen option and finish with DONE.
+
 ## Browser Selection Rules - VERY IMPORTANT:
 - If user says "open website" or "go to website" WITHOUT specifying browser → Use browser_navigate (Playwright)
 - If user says "open Safari" or "use Safari" → Use safari_navigate (controls real Safari app)
@@ -234,6 +239,8 @@ Response: DONE: Successfully completed the task...
     - DON'T just return DONE after seeing search results - you need to get the actual content!
 13. IMPORTANT - Click LIMIT: After clicking a search result link, you MUST immediately call browser_get_content to extract the actual content. NEVER click more than once - if the first click doesn't work, use browser_get_content on the current page instead.
 14. Use browser_get_content to get the actual text/content from the page after any navigation or click. This is how you extract useful information!
+15. If the user's request is ambiguous or there are multiple choices, call ask_user first to clarify, then continue execution.
+16. For ask_user responses, the user will reply in chat using `!tars <answer>`. Use the returned `answer` to continue.
 
 If no tool can accomplish the user's request, then respond with NEED_SKILL: and describe what you need.
 """
@@ -1243,6 +1250,9 @@ If no tool can accomplish the user's request, then respond with NEED_SKILL: and 
                 pattern=arguments.get('pattern', ''),
                 path=arguments.get('path', '.')
             )
+        elif tool_name == "ask_user":
+            from components.tools.planner_tools.system import AskUserTool
+            return await AskUserTool().execute(helper_plugin, arguments)
         elif tool_name == "fetch_url":
             url = arguments.get('url', '')
             if not url:
