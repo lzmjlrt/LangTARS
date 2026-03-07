@@ -278,17 +278,30 @@ class LangTARS(Command, BasePlugin):
 
     def _resolve_path(self, path: str):
         from pathlib import Path
+        import os
         if not self._workspace_path:
             return None
         try:
             requested = Path(path).expanduser()
+            workspace_resolved = self._workspace_path.resolve()
+            
             if requested.is_absolute():
                 resolved = requested.resolve()
-                if not str(resolved).startswith(str(self._workspace_path.resolve())):
+                # Use os.path.commonpath for more robust path comparison on Windows
+                # This handles case-insensitivity and different path separators
+                try:
+                    common = Path(os.path.commonpath([str(resolved), str(workspace_resolved)]))
+                    # Compare resolved paths to handle case-insensitivity on Windows
+                    if common.resolve() != workspace_resolved:
+                        return None
+                except ValueError:
+                    # commonpath raises ValueError if paths are on different drives
                     return None
                 return resolved
             return (self._workspace_path / requested).resolve()
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"_resolve_path error for '{path}': {e}")
             return None
 
     # ========== Helper Methods ==========
@@ -346,10 +359,12 @@ class LangTARS(Command, BasePlugin):
             return {'success': False, 'error': 'Disabled'}
         fp = self._resolve_path(path)
         if not fp:
-            return {'success': False, 'error': 'Access denied'}
+            return {'success': False, 'error': f'Access denied: path "{path}" is outside workspace'}
         try:
+            if not fp.exists():
+                return {'success': False, 'error': f'File not found: {fp}'}
             if not fp.is_file():
-                return {'success': False, 'error': 'Not a file'}
+                return {'success': False, 'error': f'Not a file (is directory): {fp}'}
             content = fp.read_text(encoding='utf-8')
             return {'success': True, 'path': str(fp), 'content': content, 'size': len(content)}
         except UnicodeDecodeError:
