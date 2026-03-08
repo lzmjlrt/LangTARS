@@ -1,10 +1,12 @@
 # ClawHub Skills Loader
 # Loads and manages skills from local skills directory and remote hub
+# Also supports Claude Code format skills (SKILL.md)
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ from . import BasePlannerTool
 
 
 class Skill:
-    """Represents a ClawHub Skill"""
+    """Represents a Skill (ClawHub or Claude Code format)"""
 
     def __init__(
         self,
@@ -24,7 +26,8 @@ class Skill:
         description: str,
         path: Path,
         manifest: dict[str, Any],
-        source: str = "local",  # "local" or "remote"
+        source: str = "local",  # "local", "remote", or "claude-code"
+        skill_content: str = "",  # Content of SKILL.md for Claude Code format
     ):
         self.name = name
         self.version = version
@@ -32,6 +35,7 @@ class Skill:
         self.path = path
         self.manifest = manifest
         self.source = source
+        self.skill_content = skill_content  # Full content of SKILL.md
         self.parameters = manifest.get("parameters", {})
         self.returns = manifest.get("returns", {})
         self.dependencies = manifest.get("npm_dependencies", {})
@@ -73,7 +77,7 @@ class SkillLoader:
         await self._scan_local_skills()
 
     async def _scan_local_skills(self) -> None:
-        """Scan local skills directory"""
+        """Scan local skills directory for both ClawHub and Claude Code format skills"""
         if not self.skills_dir.exists():
             return
 
@@ -82,29 +86,128 @@ class SkillLoader:
                 if not item.is_dir():
                     continue
 
+                # Try ClawHub format first (manifest.yaml)
                 manifest_path = item / "manifest.yaml"
-                if not manifest_path.exists():
-                    continue
+                skill_md_path = item / "SKILL.md"
+                
+                if manifest_path.exists():
+                    # ClawHub format
+                    try:
+                        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+                        if not manifest:
+                            continue
 
-                try:
-                    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-                    if not manifest:
-                        continue
+                        # Also load SKILL.md content if it exists
+                        skill_content = ""
+                        if skill_md_path.exists():
+                            skill_content = skill_md_path.read_text(encoding="utf-8")
 
-                    skill = Skill(
-                        name=manifest.get("skill", item.name),
-                        version=manifest.get("version", "1.0.0"),
-                        description=manifest.get("description", ""),
-                        path=item,
-                        manifest=manifest,
-                        source="local",
-                    )
-                    self._loaded_skills[skill.name] = skill
-                    print(f"[DEBUG] Loaded local skill: {skill.name}")
-                except Exception as e:
-                    print(f"[DEBUG] Failed to load skill from {item}: {e}")
+                        skill = Skill(
+                            name=manifest.get("skill", item.name),
+                            version=manifest.get("version", "1.0.0"),
+                            description=manifest.get("description", ""),
+                            path=item,
+                            manifest=manifest,
+                            source="local",
+                            skill_content=skill_content,
+                        )
+                        self._loaded_skills[skill.name] = skill
+                        print(f"[DEBUG] Loaded local skill (ClawHub): {skill.name}")
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to load ClawHub skill from {item}: {e}")
+                
+                elif skill_md_path.exists():
+                    # Claude Code format (SKILL.md only)
+                    try:
+                        skill_content = skill_md_path.read_text(encoding="utf-8")
+                        
+                        # Parse SKILL.md to extract metadata
+                        manifest = self._parse_skill_md(skill_content, item.name)
+                        
+                        skill = Skill(
+                            name=manifest.get("skill", item.name),
+                            version=manifest.get("version", "1.0.0"),
+                            description=manifest.get("description", ""),
+                            path=item,
+                            manifest=manifest,
+                            source="claude-code",
+                            skill_content=skill_content,
+                        )
+                        self._loaded_skills[skill.name] = skill
+                        print(f"[DEBUG] Loaded local skill (Claude Code): {skill.name}")
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to load Claude Code skill from {item}: {e}")
         except Exception as e:
             print(f"[DEBUG] Failed to scan skills directory: {e}")
+
+    def _parse_skill_md(self, content: str, folder_name: str) -> dict[str, Any]:
+        """Parse SKILL.md content to extract metadata"""
+        manifest: dict[str, Any] = {
+            "skill": folder_name,
+            "version": "1.0.0",
+            "description": "",
+            "parameters": {},
+            "source_format": "claude-code",
+        }
+        
+        lines = content.split("\n")
+        
+        # Extract title from first H1
+        for line in lines:
+            if line.startswith("# "):
+                manifest["skill"] = line[2:].strip().lower().replace(" ", "-")
+                break
+        
+        # Extract description from Overview section or first paragraph
+        in_overview = False
+        description_lines = []
+        for i, line in enumerate(lines):
+            if line.startswith("## Overview"):
+                in_overview = True
+                continue
+            if in_overview:
+                if line.startswith("## "):
+                    break
+                if line.strip():
+                    description_lines.append(line.strip())
+                    if len(description_lines) >= 3:
+                        break
+        
+        if description_lines:
+            manifest["description"] = " ".join(description_lines)
+        else:
+            # Fallback: use first non-header paragraph
+            for line in lines:
+                if line.strip() and not line.startswith("#") and not line.startswith("**"):
+                    manifest["description"] = line.strip()
+                    break
+        
+        # Extract parameters from "Triggering This Skill" section
+        in_trigger = False
+        in_code_block = False
+        for line in lines:
+            if "Triggering" in line and "Skill" in line:
+                in_trigger = True
+                continue
+            if in_trigger:
+                if line.startswith("```"):
+                    in_code_block = not in_code_block
+                    continue
+                if line.startswith("## "):
+                    break
+                if in_code_block and ":" in line:
+                    # Parse parameter like "Product: [name]"
+                    parts = line.split(":", 1)
+                    if len(parts) == 2:
+                        param_name = parts[0].strip().lower().replace(" ", "_")
+                        param_desc = parts[1].strip()
+                        manifest["parameters"][param_name] = {
+                            "type": "string",
+                            "description": param_desc,
+                            "required": False,
+                        }
+        
+        return manifest
 
     async def search_skills(self, query: str) -> list[Skill]:
         """Search skills by query (name or description)"""
@@ -389,8 +492,26 @@ class SkillToToolConverter:
         async def execute(self, helper_plugin: Any, arguments: dict[str, Any]) -> dict[str, Any]:
             """Execute the skill"""
             skill_manifest = skill.manifest
+            
+            # Check if this is a Claude Code format skill with SKILL.md content
+            if skill.source == "claude-code" or skill.skill_content:
+                # For Claude Code skills, return the skill content as guidance
+                # The LLM will use this content to generate the appropriate code
+                return {
+                    "success": True,
+                    "skill": skill.name,
+                    "version": skill.version,
+                    "description": skill.description,
+                    "source": skill.source,
+                    "skill_content": skill.skill_content,
+                    "arguments": arguments,
+                    "message": f"Skill '{skill.name}' loaded. Use the skill_content as a guide to generate the requested output. "
+                               f"The skill content contains templates, examples, and best practices for this task.",
+                    "instructions": "Follow the patterns and templates in skill_content to generate the code. "
+                                    "Use the provided arguments to customize the output.",
+                }
 
-            # Check if skill has implementation files
+            # Check if skill has implementation files (ClawHub format)
             adds = skill_manifest.get("adds", [])
             modifies = skill_manifest.get("modifies", [])
 

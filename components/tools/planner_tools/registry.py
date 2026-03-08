@@ -198,15 +198,24 @@ class ToolRegistry:
 
     async def _register_skills(self):
         """Register loaded skills as tools"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if not self._skill_loader:
+            logger.debug("Skill loader not available")
             return
 
         skills = self._skill_loader.get_all_skills()
+        logger.info(f"Found {len(skills)} skills to register")
+        
         for skill in skills:
             tool = SkillToToolConverter.convert(skill)
             if tool:
                 self._builtin_tools[tool.name] = tool
-                print(f"[DEBUG] Registered skill as tool: {tool.name}")
+                logger.info(f"[SKILL] Registered skill as tool: {tool.name} (source: {skill.source})")
+                print(f"[DEBUG] Registered skill as tool: {tool.name} (source: {skill.source})")
+            else:
+                logger.warning(f"[SKILL] Failed to convert skill to tool: {skill.name}")
 
     def get_tool(self, name: str) -> BasePlannerTool | None:
         """Get a tool by name"""
