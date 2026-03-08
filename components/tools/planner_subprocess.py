@@ -52,6 +52,11 @@ async def run_planner(args: dict):
     helper_plugin.config = config.copy()
     await helper_plugin.initialize()
 
+    # Initialize tool registry
+    from components.tools.planner_tools.registry import ToolRegistry
+    registry = ToolRegistry(plugin)
+    await registry.initialize()
+
     # Create executor and run
     executor = PlannerExecutor()
 
@@ -62,6 +67,7 @@ async def run_planner(args: dict):
             llm_model_uuid=llm_model_uuid,
             plugin=plugin,
             helper_plugin=helper_plugin,
+            registry=registry,
             session=None,
             query_id=0
         ):

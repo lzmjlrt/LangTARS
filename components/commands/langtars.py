@@ -320,7 +320,7 @@ class LangTARS(Command):
             subcommand=LanTARSCommand.stop,
             help="Stop the current running task",
             usage="!tars stop",
-            aliases=["pause", "cancel"],
+            aliases=["pause"],  # Removed "cancel" to avoid conflict with "no" command
         )
 
         self.registered_subcommands["logs"] = Subcommand(
@@ -675,8 +675,13 @@ class LanTARSCommand:
 
         # Fallback: set stop flag and remove run file
         logger.warning("[STOP] No subprocess running, using fallback")
-        PlannerTool.stop_task()
-        SubprocessPlanner._remove_run_file()
+        # Only call stop_task if there's actually a task to stop
+        # This prevents setting stop flags when no task is running
+        from components.tools.planner.state import get_state_manager
+        state_manager = get_state_manager()
+        if state_manager.current_task:
+            PlannerTool.stop_task()
+        SubprocessPlanner.remove_run_file()
         await _cleanup_browser()
 
         yield CommandReturn(text="🛑 Stop signal sent.\n\nIf the task doesn't stop, run in terminal:\n  touch /tmp/langtars_user_stop")
@@ -1192,7 +1197,12 @@ Go to Pipelines → Configure → Select LLM Model
             async def run_task():
                 try:
                     # Keep the run file semantics so stop checks stay consistent
-                    SubprocessPlanner._create_run_file()
+                    SubprocessPlanner.create_run_file()
+
+                    # Initialize tool registry
+                    from components.tools.planner_tools.registry import ToolRegistry
+                    registry = ToolRegistry(_self_cmd.plugin)
+                    await registry.initialize()
 
                     executor = PlannerExecutor()
                     async for partial_result in executor.execute_task_streaming(
@@ -1201,6 +1211,7 @@ Go to Pipelines → Configure → Select LLM Model
                         llm_model_uuid=llm_model_uuid,
                         plugin=_self_cmd.plugin,
                         helper_plugin=_self_cmd.plugin,
+                        registry=registry,
                         session=context.session,
                         query_id=context.query_id
                     ):
@@ -1224,7 +1235,7 @@ Go to Pipelines → Configure → Select LLM Model
                     await _reply_background(f"❌ Task error:\n{BackgroundTaskManager._last_result}")
                     await _auto_execute_result_reply()
                 finally:
-                    SubprocessPlanner._remove_run_file()
+                    SubprocessPlanner.remove_run_file()
                     if bool(config.get("auto_cleanup_browser_on_finish", False)):
                         await _cleanup_browser("run_task.finally")
                     BackgroundTaskManager._task_running = False
