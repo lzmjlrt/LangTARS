@@ -205,6 +205,9 @@ spec:
         zh_Hans: 'Skills 目录路径（默认：~/.claude/skills）'
       default: ~/.claude/skills
   components:
+    Command:
+      fromDirs:
+      - path: components/commands/
     Tool:
       fromDirs:
       - path: components/tools/
