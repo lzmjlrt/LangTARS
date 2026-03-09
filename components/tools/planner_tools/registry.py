@@ -228,15 +228,10 @@ class ToolRegistry:
     def to_openai_format(self) -> list:
         """Convert all tools to LangBot LLMTool format for native tool calling
         
-        Note: Currently disabled due to LangBot API bug with LLMTool serialization.
-        The func field is excluded during model_dump() but required during model_validate().
-        
         Returns:
-            Empty list (native tool calling disabled)
+            List of LLMTool instances for use with invoke_llm
         """
-        # TODO: Enable when LangBot fixes the LLMTool serialization bug
-        # return [tool.to_llm_tool() for tool in self._builtin_tools.values()]
-        return []
+        return [tool.to_llm_tool() for tool in self._builtin_tools.values()]
 
     async def load_dynamic_tools(self) -> list[BasePlannerTool]:
         """Load dynamic tools from MCP servers and plugins"""
