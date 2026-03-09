@@ -24,6 +24,10 @@ IS_MACOS = platform.system() == "Darwin"
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
 
+# Detect system encoding for subprocess output (GBK on Chinese Windows, etc.)
+# Note: On Windows, we force UTF-8 output via chcp 65001 / [Console]::OutputEncoding
+logger.warning("[LangTARS] Encoding: subprocess output forced to UTF-8 on Windows")
+
 # Import platform-specific modules
 if IS_MACOS:
     from components.native.safari import SafariController
@@ -195,9 +199,10 @@ class LangTARS(Command, BasePlugin):
         try:
             # Use different shell based on platform
             if IS_WINDOWS:
-                # Use cmd.exe on Windows
+                # Force cmd.exe to output UTF-8 via chcp 65001
+                utf8_command = f'chcp 65001 >nul && {command}'
                 process = await asyncio.create_subprocess_shell(
-                    command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, 
+                    utf8_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     cwd=str(working_path), shell=True)
             else:
                 process = await asyncio.create_subprocess_shell(
@@ -238,8 +243,12 @@ class LangTARS(Command, BasePlugin):
                 temp_file = f.name
 
             try:
-                # Execute PowerShell with the script file
-                cmd = f'powershell.exe -ExecutionPolicy Bypass -NoProfile -File "{temp_file}"'
+                # Execute PowerShell with the script file, forcing UTF-8 output
+                cmd = (
+                    f'powershell.exe -ExecutionPolicy Bypass -NoProfile -Command '
+                    f'"[Console]::OutputEncoding = [Text.Encoding]::UTF8; '
+                    f'& \'{temp_file}\'"'
+                )
                 process = await asyncio.create_subprocess_shell(
                     cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                 try:
