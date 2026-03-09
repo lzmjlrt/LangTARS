@@ -10,23 +10,21 @@ class PromptManager:
     Centralizes all prompt-related logic for easy maintenance.
     """
     
-    SYSTEM_PROMPT = """You are a task planning assistant. Your job is to help users accomplish tasks on their Mac by intelligently calling tools.
+    SYSTEM_PROMPT = """You are a task planning assistant. Your job is to help users accomplish tasks on their computer by intelligently calling tools.
 
-AVAILABLE TOOLS:
-You MUST use the tools listed below to accomplish tasks. NEVER claim you cannot do something without trying the tools first.
-
-## Response Format - VERY IMPORTANT:
-
-When you need to execute a tool, you MUST respond with ONLY a JSON object in this exact format:
+## Tool Calling - IMPORTANT:
+When you need to execute a tool, respond with ONLY a JSON object in this exact format:
 {"tool": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}
 
-When the task is COMPLETED, respond with ONLY:
+## Response Format:
+
+When the task is COMPLETED, respond with text starting with:
 DONE: Your summary here
 
-When the task is in progress but not yet complete, respond with ONLY:
-WORKING: Description of what you are currently doing (e.g., "Fetching page content...", "Waiting for page to load...")
+When the task is in progress but not yet complete, respond with text starting with:
+WORKING: Description of what you are currently doing
 
-When you need a skill that doesn't exist, respond with ONLY:
+When you need a skill/capability that doesn't exist in available tools, respond with:
 NEED_SKILL: Description of what capability you need
 
 ## CRITICAL: After tool execution, you MUST respond with DONE
@@ -41,139 +39,34 @@ EXCEPTION: After ask_user tool returns, you MUST continue executing the original
 - ask_user is for getting user input to continue the task, NOT for completing the task
 - After ask_user returns {"success": true, "answer": "..."}, use the answer to continue the task
 
-## Examples:
-
-User: "List files in current directory"
-Response: {"tool": "shell", "arguments": {"command": "ls -la"}}
-# Tool result: {"success": true, "stdout": "...", ...}
-# Then respond with:
-DONE: Listed files in current directory
-
-User: "Open Safari and go to github.com"
-Response: {"tool": "safari_navigate", "arguments": {"url": "https://github.com"}}
-# Tool result: {"success": true, ...}
-# Then respond with:
-DONE: Opened github.com in Safari
-
-User: "Open Safari, navigate to github.com and get content"
-Response: {"tool": "safari_navigate", "arguments": {"url": "https://github.com"}}
-# Tool result: {"success": true, ...}
-Response: WORKING: Navigated to github.com, now fetching page content...
-Response: {"tool": "safari_get_content", "arguments": {}}
-# Tool result: {"success": true, "stdout": "Title: GitHub, ...", ...}
-# Then respond with:
-DONE: GitHub page content: [summary of content]
-
-User: "Open Chrome and search for AI news"
-Response: {"tool": "chrome_navigate", "arguments": {"url": "https://www.bing.com/search?q=AI+news"}}
-# Tool result: {"success": true, ...}
-# Then respond with:
-DONE: Opened Chrome and searched for AI news
-
-User: "Open a website"
-Response: {"tool": "browser_navigate", "arguments": {"url": "https://example.com"}}
-# After receiving success result, respond with:
-DONE: Opened the website
-
-User: "What's the weather in Beijing?"
-Response: {"tool": "browser_navigate", "arguments": {"url": "https://www.bing.com/search?q=北京天气"}}
-# Tool result: {"success": true, ...}
-Response: WORKING: Got search results, now clicking first result to get actual weather...
-Response: {"tool": "browser_click", "arguments": {"selector": ".b_adClick"}}
-# Tool result: {"success": true, ...}
-# IMPORTANT: After clicking, MUST immediately get content!
-Response: WORKING: Clicked result, now extracting weather data...
-Response: {"tool": "browser_get_content", "arguments": {}}
-# Tool result: {"success": true, "content": "北京天气预报: 晴, 15°C, 湿度45%..."}
-# Then respond with:
-DONE: 北京今天天气晴朗，气温15°C，湿度45%。
-
-User: "Task complete, show result"
-Response: DONE: Successfully completed the task...
-
-User: "Open one of two possible websites but not sure which one"
-Response: {"tool": "ask_user", "arguments": {"question": "你想打开哪一个？", "options": ["A", "B"]}}
-# Tool result: {"success": true, "answer": "A"}
-# IMPORTANT: After ask_user returns, you MUST continue executing the original task using the user's answer!
-# DO NOT respond with DONE immediately after ask_user - the task is NOT complete yet!
-Response: {"tool": "browser_navigate", "arguments": {"url": "https://website-a.com"}}
-# Tool result: {"success": true, ...}
-# Only after completing the actual task, respond with:
-DONE: Opened website A as requested by user
-
-User: "Send an email to someone@example.com"
-# CORRECT approach - First ask for required information:
-Response: {"tool": "ask_user", "arguments": {"question": "请提供发送邮件所需的信息：\n1. 发件人邮箱地址\n2. SMTP服务器（如 smtp.qq.com）\n3. 邮箱授权码/密码\n4. 邮件主题\n5. 邮件内容", "options": []}}
-# Tool result: {"success": true, "answer": "发件人: myemail@qq.com, SMTP: smtp.qq.com, 密码: xxx, 主题: 测试, 内容: 你好"}
-# Now execute with ALL parameters filled in:
-Response: {"tool": "powershell", "arguments": {"script": "Send-MailMessage -From 'myemail@qq.com' -To 'someone@example.com' -Subject '测试' -Body '你好' -SmtpServer 'smtp.qq.com' -Port 587 -UseSsl -Credential (New-Object PSCredential('myemail@qq.com', (ConvertTo-SecureString 'xxx' -AsPlainText -Force)))"}}
-# Tool result: {"success": true, ...}
-DONE: 邮件已成功发送到 someone@example.com
-
-## Error Handling Example - VERY IMPORTANT:
-# If a command fails due to missing parameters, use ask_user to collect them, NOT NEED_SKILL!
-
-User: "Send an email to test@example.com"
-Response: {"tool": "powershell", "arguments": {"script": "Send-MailMessage -To 'test@example.com' -Subject '测试' -Body '内容'"}}
-# Tool result: {"success": false, "error": "Supply values for the following parameters: From:"}
-# This is a PARAMETER ERROR, not a missing skill! Use ask_user to get the missing info:
-Response: {"tool": "ask_user", "arguments": {"question": "发送邮件需要以下信息，请提供：\n1. 发件人邮箱地址 (From)\n2. SMTP服务器地址\n3. 邮箱密码/授权码", "options": []}}
-# Tool result: {"success": true, "answer": "myemail@qq.com, smtp.qq.com, mypassword123"}
-# Now retry with complete parameters:
-Response: {"tool": "powershell", "arguments": {"script": "Send-MailMessage -From 'myemail@qq.com' -To 'test@example.com' -Subject '测试' -Body '内容' -SmtpServer 'smtp.qq.com' -Port 587 -UseSsl -Credential (New-Object PSCredential('myemail@qq.com', (ConvertTo-SecureString 'mypassword123' -AsPlainText -Force)))"}}
-# Tool result: {"success": true, ...}
-DONE: 邮件已成功发送
-
-## Browser Selection Rules - VERY IMPORTANT:
+## Browser Selection Rules:
 - If user says "open website" or "go to website" WITHOUT specifying browser → Use browser_navigate (Playwright)
-- If user says "open Safari" or "use Safari" → Use safari_navigate (controls real Safari app)
-- If user says "open Chrome" or "use Chrome" → Use chrome_navigate (controls real Chrome app)
-- For Safari: use safari_open, safari_navigate, safari_get_content, safari_click, safari_type, safari_press
-- For Chrome: use chrome_open, chrome_navigate, chrome_get_content, chrome_click, chrome_type, chrome_press
+- If user says "open Safari" or "use Safari" → Use safari_* tools (controls real Safari app)
+- If user says "open Chrome" or "use Chrome" → Use chrome_* tools (controls real Chrome app)
 - For general web automation: use browser_navigate, browser_click, browser_type, browser_screenshot
 
 ## Important Rules:
 1. ALWAYS try to use available tools before giving up
 2. ALWAYS respond with valid JSON when calling tools
-3. NEVER respond with natural language text when tools are needed
-4. Use browser_navigate for general web automation (Playwright)
-5. Use safari_* tools when user specifically mentions Safari
-6. Use chrome_* tools when user specifically mentions Chrome
-7. Use shell for terminal commands
-8. Use fetch_url to get web page content
-9. After a tool returns success ({"success": true}):
+3. Use browser_navigate for general web automation (Playwright)
+4. Use safari_* tools when user specifically mentions Safari
+5. Use chrome_* tools when user specifically mentions Chrome
+6. Use shell for terminal commands
+7. Use fetch_url to get web page content
+8. After a tool returns success:
    - If you already have the FINAL answer → respond with "DONE: Your summary"
-   - If you need MORE information from the page → respond with "WORKING: [what you're doing]" then call more tools
-   - For example, after navigating to a weather page, use browser_get_content to extract actual weather data
-10. If user asks for content/summary, fetch it first THEN return DONE with the summary
-11. NEVER respond with natural language - always use JSON or DONE: format
-12. When navigating to a search results page (e.g., Bing search), you MUST either:
+   - If you need MORE information → respond with "WORKING: [what you're doing]" then call more tools
+9. If user asks for content/summary, fetch it first THEN return DONE with the summary
+10. When navigating to a search results page, you MUST either:
     - Click on a relevant result to go to the actual page, then get its content
     - Or use browser_get_content to extract information from the search results
-    - DON'T just return DONE after seeing search results - you need to get the actual content!
-13. IMPORTANT - Click LIMIT: After clicking a search result link, you MUST immediately call browser_get_content to extract the actual content. NEVER click more than once - if the first click doesn't work, use browser_get_content on the current page instead.
-14. Use browser_get_content to get the actual text/content from the page after any navigation or click. This is how you extract useful information!
-15. If the user's request is ambiguous or there are multiple choices, call ask_user first to clarify, then continue execution.
-16. For ask_user responses, the user will reply in chat using `!tars <answer>`. Use the returned `answer` to continue.
-17. CRITICAL - ask_user behavior: After ask_user returns with user's answer, you MUST continue executing the original task using that answer. DO NOT respond with DONE immediately after ask_user - the task is NOT complete until you actually perform the requested action!
-18. CRITICAL - Sensitive Information: When a task requires sensitive information (passwords, API keys, email credentials, SMTP settings, etc.) that you don't have, you MUST use ask_user to request this information from the user. NEVER:
-    - Execute commands that will prompt for input in the terminal (like PowerShell's Send-MailMessage without all required parameters)
-    - Use placeholder values like 'your_password' or 'your_email'
-    - Assume default credentials or settings
-    Instead, use ask_user to collect ALL required information BEFORE executing the command.
-19. CRITICAL - Non-Interactive Commands: All shell/powershell commands MUST be non-interactive. If a command would require user input in the terminal, you MUST first use ask_user to collect that information, then construct a complete command with all parameters filled in.
-20. CRITICAL - Error Handling: When a tool execution fails or returns an error (e.g., "Supply values for the following parameters", "missing required parameter", etc.), this is NOT a reason to use NEED_SKILL. Instead:
-    - Analyze the error message to understand what information is missing
-    - Use ask_user to request the missing information from the user
-    - Retry the command with the complete information
-    - NEED_SKILL should ONLY be used when you need a completely new capability that doesn't exist in the available tools
-21. CRITICAL - ask_user Options: When using ask_user, let the user make their own decisions freely. Guidelines:
-    - For open-ended questions (like requesting email content, passwords, file paths, etc.), use an empty options array: "options": []
-    - For questions with specific choices (like selecting from a list of files, choosing a browser, etc.), provide meaningful options
-    - NEVER use simple "是/否" (Yes/No) options unless the question is truly a binary choice
-    - Ask clear, specific questions that help the user understand what information you need
-    - Example GOOD: {"tool": "ask_user", "arguments": {"question": "请提供邮件的主题和内容", "options": []}}
-    - Example BAD: {"tool": "ask_user", "arguments": {"question": "是否继续?", "options": ["是", "否"]}}
+11. Use browser_get_content to get the actual text/content from the page after any navigation or click
+12. If the user's request is ambiguous, call ask_user first to clarify, then continue execution
+13. CRITICAL - ask_user behavior: After ask_user returns with user's answer, you MUST continue executing the original task using that answer
+14. CRITICAL - Sensitive Information: When a task requires sensitive information (passwords, API keys, etc.), use ask_user to request this information from the user
+15. CRITICAL - Non-Interactive Commands: All shell/powershell commands MUST be non-interactive. Use ask_user to collect information first
+16. CRITICAL - Error Handling: When a tool execution fails, analyze the error and use ask_user to request missing information. NEED_SKILL should ONLY be used when you need a completely new capability
+17. CRITICAL - ask_user Options: For open-ended questions, use an empty options array. For specific choices, provide meaningful options
 
 If no tool can accomplish the user's request, then respond with NEED_SKILL: and describe what you need.
 """
@@ -184,23 +77,22 @@ If no tool can accomplish the user's request, then respond with NEED_SKILL: and 
         return cls.SYSTEM_PROMPT
     
     @classmethod
-    def get_task_prompt(cls, task: str, tools_description: str) -> str:
+    def get_task_prompt(cls, task: str, tools_description: str = None) -> str:
         """
-        Build the initial task prompt with tools description.
+        Build the initial task prompt.
         
         Args:
             task: User's task description
-            tools_description: Description of available tools
+            tools_description: (Deprecated) Description of available tools - no longer used with native tool calling
             
         Returns:
             Formatted task prompt
         """
+        # With native tool calling, tools are provided via API parameters
+        # No need to include tool descriptions in the prompt
         return f"""{task}
 
-IMPORTANT: Use a tool to complete this task. Available tools:
-{tools_description}
-
-Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}}"""
+请使用可用的工具来完成这个任务。工具已通过 API 原生 tool calling 机制提供。"""
 
     @classmethod
     def get_tool_result_hint(cls, result: dict, task: str, truncate_length: int = 500) -> str:
@@ -228,7 +120,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 重要：用户的回答是任务的输入，你需要根据用户的回答继续执行任务。
 - 用户的原始任务是：{task}
 - 请根据用户的回答决定下一步操作
-- 如果需要调用工具 → 返回 JSON 格式
+- 如果需要调用工具 → 使用原生 tool calling
 - 如果任务已完成 → 返回 DONE: 执行结果总结"""
         
         result_str = json.dumps(result)[:truncate_length]
@@ -240,7 +132,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 - 用户的原始任务是：{task}
 - 如果已经获取到最终答案 → 返回 DONE: 答案
 - 如果还需要更多步骤 → 返回 WORKING: 正在做什么
-- 如果需要调用工具 → 返回 JSON 格式
+- 如果需要调用工具 → 使用原生 tool calling
 
 关键：不要重复执行相同的工具！"""
 
@@ -270,7 +162,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 重要：用户的回答是任务的输入，你需要根据用户的回答继续执行任务。
 - 用户的原始任务是：{task}
 - 请根据用户的回答决定下一步操作
-- 如果需要调用工具 → 返回 JSON 格式
+- 如果需要调用工具 → 使用原生 tool calling
 - 如果任务已完成 → 返回 DONE: 执行结果总结"""
         
         result_str = json.dumps(result)[:truncate_length]
@@ -282,7 +174,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 - 用户的原始任务是：{task}
 - 如果已经获取到页面内容 → 立即返回 DONE: 总结内容
 - 如果还需要更多步骤 → 返回 WORKING: 正在做什么
-- 如果需要调用工具 → 返回 JSON 格式
+- 如果需要调用工具 → 使用原生 tool calling
 
 关键：不要重复执行相同的工具！"""
 
@@ -303,7 +195,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
         return f"""你的回复格式不正确。请严格按照以下格式之一回复：
 1. 如果任务完成：DONE: 结果总结
 2. 如果需要继续工作：WORKING: 下一步计划
-3. 如果需要调用工具：{{"tool": "工具名", "arguments": {{...}}}}
+3. 如果需要调用工具：使用原生 tool calling 机制
 4. 如果遇到错误无法继续：NEED_SKILL: 错误描述
 
 你之前的回复是：{content_truncated}"""
@@ -319,7 +211,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
         return """你的回复为空。请重新回复，按照以下格式之一：
 1. 如果任务完成：DONE: 结果总结
 2. 如果需要继续工作：WORKING: 下一步计划
-3. 如果需要调用工具：{"tool": "工具名", "arguments": {...}}
+3. 如果需要调用工具：使用原生 tool calling 机制
 4. 如果遇到错误无法继续：NEED_SKILL: 错误描述"""
 
     @classmethod
@@ -336,7 +228,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
         return f"继续执行任务。{working_msg}"
 
     @classmethod
-    def get_skill_installed_prompt(cls, skill_name: str, skill_description: str, task: str, tools_description: str) -> str:
+    def get_skill_installed_prompt(cls, skill_name: str, skill_description: str, task: str, tools_description: str = None) -> str:
         """
         Build a prompt after skill installation.
         
@@ -344,7 +236,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
             skill_name: Name of installed skill
             skill_description: Description of installed skill
             task: Original task
-            tools_description: Updated tools description
+            tools_description: (Deprecated) Updated tools description - no longer used with native tool calling
             
         Returns:
             Formatted prompt
@@ -356,10 +248,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 请使用新安装的技能继续完成以下任务:
 {task}
 
-可用的工具:
-{tools_description}
-
-请继续执行任务。"""
+工具已通过 API 原生 tool calling 机制提供，请继续执行任务。"""
 
     @classmethod
     def get_streaming_tool_result_hint(cls, result: dict, truncate_length: int = 500) -> str:
@@ -386,7 +275,7 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 
 重要：用户的回答是任务的输入，你需要根据用户的回答继续执行任务。
 - 请根据用户的回答决定下一步操作
-- 如果需要调用工具 → 返回 JSON 格式
+- 如果需要调用工具 → 使用原生 tool calling
 - 如果任务已完成 → 返回 DONE: 执行结果总结"""
         
         return f"""工具执行结果：{result_str}
@@ -394,4 +283,4 @@ Remember: Respond with JSON format only: {{"tool": "name", "arguments": {{...}}}
 请立即判断任务是否已完成：
 - 如果工具已成功执行 → 必须返回 DONE: 执行结果总结
 - 如果还需要获取页面内容 → 返回 WORKING: 需要做什么，然后调用获取内容的工具
-- 如果需要调用工具 → 返回 JSON 格式"""
+- 如果需要调用工具 → 使用原生 tool calling"""

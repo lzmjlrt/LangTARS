@@ -106,13 +106,14 @@ class ReActExecutor:
         config = plugin.get_config() if plugin else {}
         rate_limit_seconds = float(config.get('planner_rate_limit_seconds', 1))
         
-        # Get tools description
-        tools_description = ""
+        # Get tools in OpenAI format for native tool calling
+        tools_openai_format = []
         if registry:
             try:
-                tools_description = registry.get_tools_description()
+                tools_openai_format = registry.to_openai_format()
+                logger.info(f"已加载 {len(tools_openai_format)} 个工具用于原生 tool calling")
             except Exception as e:
-                logger.error(f"获取 tools_description 失败: {e}")
+                logger.error(f"获取 tools_openai_format 失败: {e}")
         
         # Build initial messages
         messages = [
@@ -122,7 +123,7 @@ class ReActExecutor:
             ),
             provider_message.Message(
                 role="user",
-                content=PromptManager.get_task_prompt(task, tools_description)
+                content=PromptManager.get_task_prompt(task)
             ),
         ]
         
@@ -145,10 +146,10 @@ class ReActExecutor:
                 call_count = self._state_manager.increment_llm_call_count()
                 logger.info(f"LLM 调用开始 (第 {call_count} 次), task: {task[:50]}...")
                 
-                # Call LLM with stop check
+                # Call LLM with stop check and native tools
                 try:
                     response = await self._call_llm_with_stop_check(
-                        plugin, llm_model_uuid, messages
+                        plugin, llm_model_uuid, messages, tools=tools_openai_format
                     )
                 except asyncio.CancelledError:
                     self._state_manager.stop_current_task()
@@ -210,12 +211,20 @@ class ReActExecutor:
         plugin,
         llm_model_uuid: str,
         messages: list,
+        tools: list = None,
     ):
-        """Call LLM and periodically check for stop signal"""
+        """Call LLM and periodically check for stop signal
+        
+        Args:
+            plugin: Plugin instance for LLM calls
+            llm_model_uuid: UUID of the LLM model
+            messages: Message history
+            tools: List of tools in OpenAI format for native tool calling
+        """
         llm_task = asyncio.create_task(plugin.invoke_llm(
             llm_model_uuid=llm_model_uuid,
             messages=messages,
-            funcs=[]
+            funcs=tools or []
         ))
         
         while not llm_task.done():
@@ -457,6 +466,14 @@ class ReActExecutor:
         rate_limit_seconds = float(config.get('planner_rate_limit_seconds', 1))
         max_iterations = 5
         
+        # Get tools in OpenAI format for native tool calling
+        tools_openai_format = []
+        if registry:
+            try:
+                tools_openai_format = registry.to_openai_format()
+            except Exception as e:
+                logger.error(f"获取 tools_openai_format 失败: {e}")
+        
         for iteration in range(max_iterations):
             if self._state_manager.is_stopped():
                 self._log_llm_call_end()
@@ -476,7 +493,8 @@ class ReActExecutor:
                     response = await self._call_llm_with_stop_check(
                         plugin,
                         config.get('planner_model_uuid', ''),
-                        messages
+                        messages,
+                        tools=tools_openai_format
                     )
                 except asyncio.CancelledError:
                     self._state_manager.stop_current_task()
@@ -691,13 +709,14 @@ class PlannerExecutor:
         config = plugin.get_config() if plugin else {}
         rate_limit_seconds = float(config.get('planner_rate_limit_seconds', 1))
         
-        # Get tools description
-        tools_description = ""
+        # Get tools in OpenAI format for native tool calling
+        tools_openai_format = []
         if registry:
             try:
-                tools_description = registry.get_tools_description()
-            except Exception:
-                pass
+                tools_openai_format = registry.to_openai_format()
+                logger.info(f"已加载 {len(tools_openai_format)} 个工具用于原生 tool calling")
+            except Exception as e:
+                logger.error(f"获取 tools_openai_format 失败: {e}")
         
         # Build messages
         messages = [
@@ -707,7 +726,7 @@ class PlannerExecutor:
             ),
             provider_message.Message(
                 role="user",
-                content=PromptManager.get_task_prompt(task, tools_description)
+                content=PromptManager.get_task_prompt(task)
             ),
         ]
         
@@ -740,9 +759,9 @@ class PlannerExecutor:
                 yield "Task stopped by user."
                 return
             
-            # Call LLM
+            # Call LLM with native tools
             try:
-                response = await self._call_llm_with_stop_check(plugin, llm_model_uuid, messages)
+                response = await self._call_llm_with_stop_check(plugin, llm_model_uuid, messages, tools=tools_openai_format)
             except asyncio.CancelledError:
                 self._state_manager.stop_current_task()
                 SubprocessPlanner.clear_user_stop_file()
@@ -870,12 +889,19 @@ class PlannerExecutor:
         self._save_conversation_state(messages, task, registry, llm_model_uuid)
         yield f"Max iterations ({max_iterations}) reached. Task incomplete."
     
-    async def _call_llm_with_stop_check(self, plugin, llm_model_uuid: str, messages: list):
-        """Call LLM with periodic stop check"""
+    async def _call_llm_with_stop_check(self, plugin, llm_model_uuid: str, messages: list, tools: list = None):
+        """Call LLM with periodic stop check
+        
+        Args:
+            plugin: Plugin instance for LLM calls
+            llm_model_uuid: UUID of the LLM model
+            messages: Message history
+            tools: List of tools in OpenAI format for native tool calling
+        """
         llm_task = asyncio.create_task(plugin.invoke_llm(
             llm_model_uuid=llm_model_uuid,
             messages=messages,
-            funcs=[]
+            funcs=tools or []
         ))
         
         while not llm_task.done():
@@ -1034,6 +1060,14 @@ class PlannerExecutor:
         config = plugin.get_config() if plugin else {}
         rate_limit_seconds = float(config.get('planner_rate_limit_seconds', 1))
         
+        # Get tools in OpenAI format for native tool calling
+        tools_openai_format = []
+        if registry:
+            try:
+                tools_openai_format = registry.to_openai_format()
+            except Exception as e:
+                logger.error(f"获取 tools_openai_format 失败: {e}")
+        
         invalid_response_count = 0
         max_invalid_responses = 5
         
@@ -1063,9 +1097,9 @@ class PlannerExecutor:
                 yield "Task stopped by user."
                 return
             
-            # Call LLM
+            # Call LLM with native tools
             try:
-                response = await self._call_llm_with_stop_check(plugin, llm_model_uuid, messages)
+                response = await self._call_llm_with_stop_check(plugin, llm_model_uuid, messages, tools=tools_openai_format)
             except asyncio.CancelledError:
                 self._state_manager.stop_current_task()
                 SubprocessPlanner.clear_user_stop_file()

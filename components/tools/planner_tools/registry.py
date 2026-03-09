@@ -225,9 +225,18 @@ class ToolRegistry:
         """Get all registered tools"""
         return list(self._builtin_tools.values())
 
-    def to_openai_format(self) -> list[dict[str, Any]]:
-        """Convert all tools to OpenAI function calling format"""
-        return [tool.to_openai_format() for tool in self._builtin_tools.values()]
+    def to_openai_format(self) -> list:
+        """Convert all tools to LangBot LLMTool format for native tool calling
+        
+        Note: Currently disabled due to LangBot API bug with LLMTool serialization.
+        The func field is excluded during model_dump() but required during model_validate().
+        
+        Returns:
+            Empty list (native tool calling disabled)
+        """
+        # TODO: Enable when LangBot fixes the LLMTool serialization bug
+        # return [tool.to_llm_tool() for tool in self._builtin_tools.values()]
+        return []
 
     async def load_dynamic_tools(self) -> list[BasePlannerTool]:
         """Load dynamic tools from MCP servers and plugins"""

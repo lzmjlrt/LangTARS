@@ -34,7 +34,7 @@ class BasePlannerTool(ABC):
         pass
 
     def to_openai_format(self) -> dict[str, Any]:
-        """Convert to OpenAI function calling format"""
+        """Convert to OpenAI function calling format (dict)"""
         return {
             "type": "function",
             "function": {
@@ -43,3 +43,23 @@ class BasePlannerTool(ABC):
                 "parameters": self.parameters
             }
         }
+    
+    def to_llm_tool(self) -> 'LLMTool':
+        """Convert to LangBot LLMTool format for native tool calling
+        
+        Returns:
+            LLMTool instance for use with invoke_llm
+        """
+        from langbot_plugin.api.entities.builtin.resource.tool import LLMTool
+        
+        # Create a placeholder function - actual execution is handled by the executor
+        async def placeholder_func(**kwargs):
+            pass
+        
+        return LLMTool(
+            name=self.name,
+            human_desc=self.description,
+            description=self.description,
+            parameters=self.parameters,
+            func=placeholder_func
+        )
