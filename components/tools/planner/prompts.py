@@ -329,3 +329,59 @@ If ABSOLUTELY NO tool can accomplish the user's request (not just missing inform
 - 如果工具已成功执行 → 必须返回 DONE: 执行结果总结
 - 如果还需要获取页面内容 → 返回 WORKING: 需要做什么，然后调用获取内容的工具
 - 如果需要调用工具 → 使用原生 tool calling"""
+
+    @classmethod
+    def get_plan_review_feedback(cls, review_result) -> str:
+        """
+        Build feedback message when plan review fails.
+
+        Args:
+            review_result: PlanReviewResult from plan_reviewer
+
+        Returns:
+            Formatted feedback prompt for LLM to regenerate plan
+        """
+        return f"""你生成的计划未通过审查，请重新生成计划。
+
+{review_result.feedback}
+
+请重新生成一个改进后的计划，使用 PLAN: 格式。注意：
+- 每个步骤应包含明确的动作动词
+- 避免重复步骤
+- 步骤描述要足够具体（至少5个字符）
+- 步骤数量控制在1-10步"""
+
+    @classmethod
+    def get_step_verify_feedback(cls, step_index: int, feedback: str) -> str:
+        """
+        Build feedback message when step verification fails.
+
+        Args:
+            step_index: The step index that failed verification
+            feedback: Verification failure details
+
+        Returns:
+            Formatted feedback prompt for LLM to retry the step
+        """
+        return f"""步骤 {step_index} 的结果未通过复审:
+{feedback}
+
+请重新执行步骤 {step_index}，确保：
+- 使用相应的工具完成操作
+- 提供具体的执行结果
+- 结果要与步骤描述相关"""
+
+    @classmethod
+    def get_memory_context(cls, memory_text: str) -> str:
+        """
+        Wrap memory context for injection into messages.
+
+        Args:
+            memory_text: Formatted memory text from PlannerMemory
+
+        Returns:
+            Context message for the LLM
+        """
+        return f"""{memory_text}
+
+请注意：以上经验仅供参考，当前任务可能有不同的需求。请根据实际情况制定计划。"""
