@@ -23,6 +23,9 @@ from .builtin_tools import (
     build_confirmation_message,
 )
 from .subprocess_executor import SubprocessPlanner
+from .plan_reviewer import get_plan_reviewer
+from .memory import get_planner_memory
+from .step_verifier import get_step_verifier
 
 if TYPE_CHECKING:
     from components.tools.planner_tools.registry import ToolRegistry
@@ -30,6 +33,23 @@ if TYPE_CHECKING:
     from main import LangTARS
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_content_text(content) -> str:
+    """Safely extract text from response.content which can be str, list[ContentElement], or None."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if hasattr(item, 'text') and item.text:
+                parts.append(item.text)
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(content)
 
 
 class ReActExecutor:
@@ -288,7 +308,7 @@ class ReActExecutor:
         """
         # Handle content-based responses (no tool_calls)
         if response.content and not response.tool_calls:
-            content_str = str(response.content)
+            content_str = _extract_content_text(response.content)
             parsed = self._parser.parse(content_str)
             
             if parsed.type == ResponseType.DONE:
@@ -358,7 +378,7 @@ class ReActExecutor:
         else:
             # No tool calls and no valid content
             if response.content:
-                content_str = str(response.content)
+                content_str = _extract_content_text(response.content)
                 is_done, result = self._parser.is_done_response(content_str)
                 if is_done:
                     return result
@@ -869,12 +889,15 @@ class PlannerExecutor:
         
         yield f"开始执行任务: {task[:50]}...\n"
         logger.warning(f"=== 开始执行任务: {task[:50]}... (max_iterations={max_iterations}) ===")
-        
+
         # Get config
         config = plugin.get_config() if plugin else {}
         rate_limit_seconds = float(config.get('planner_rate_limit_seconds', 1))
         auto_cleanup = config.get('planner_auto_cleanup', True)
-        
+        plan_review_enabled = config.get('planner_plan_review_enabled', True)
+        memory_enabled = config.get('planner_memory_enabled', True)
+        step_verify_enabled = config.get('planner_step_verify_enabled', True)
+
         # Set auto-cleanup preference in state manager
         self._state_manager.set_auto_cleanup(auto_cleanup)
         
@@ -898,9 +921,27 @@ class PlannerExecutor:
                 content=PromptManager.get_task_prompt(task)
             ),
         ]
-        
+
+        # Inject relevant memories from previous tasks
+        if memory_enabled:
+            try:
+                memory_dir = config.get('planner_memory_file', '') or None
+                planner_memory = get_planner_memory(memory_dir)
+                current_user_id = self._get_current_user_id(session)
+                memories = planner_memory.get_relevant_memories(task, user_id=current_user_id)
+                if memories:
+                    memory_text = planner_memory.format_memories_for_prompt(memories)
+                    messages.insert(1, provider_message.Message(
+                        role="user",
+                        content=PromptManager.get_memory_context(memory_text)
+                    ))
+                    logger.info(f"注入用户 {current_user_id} 的 {len(memories)} 条相关记忆")
+            except Exception as e:
+                logger.warning(f"记忆加载失败: {e}")
+
         invalid_response_count = 0
         max_invalid_responses = 5
+        plan_regeneration_count = 0
         
         # ReAct loop
         for iteration in range(max_iterations):
@@ -949,7 +990,7 @@ class PlannerExecutor:
             
             # Process response
             if response.content:
-                content_str = str(response.content)
+                content_str = _extract_content_text(response.content)
                 logger.warning(f"[{iteration+1}] LLM 思考过程:\n{content_str[:1000]}")
                 
                 if not response.tool_calls:
@@ -957,6 +998,16 @@ class PlannerExecutor:
                     
                     if parsed.type == ResponseType.DONE:
                         logger.warning(f"[{iteration+1}] 任务完成: {parsed.content[:100]}")
+                        # Save task memory
+                        if memory_enabled:
+                            try:
+                                memory_dir = config.get('planner_memory_file', '') or None
+                                planner_memory = get_planner_memory(memory_dir)
+                                tools_used = self._extract_tools_used(messages)
+                                current_user_id = self._get_current_user_id(session)
+                                planner_memory.save_task_memory(task, parsed.content, tools_used, True, user_id=current_user_id)
+                            except Exception as e:
+                                logger.warning(f"保存记忆失败: {e}")
                         # Save conversation state for future continue
                         self._save_conversation_state(messages, task, registry, llm_model_uuid)
                         # Cleanup resources before returning
@@ -970,6 +1021,23 @@ class PlannerExecutor:
                     # Handle PLAN response - set up plan steps
                     if parsed.type == ResponseType.PLAN:
                         if parsed.plan_steps:
+                            # Plan review (规划审查)
+                            if plan_review_enabled:
+                                review_result = get_plan_reviewer().validate(parsed.plan_steps)
+                                if not review_result.is_valid and plan_regeneration_count < 2:
+                                    plan_regeneration_count += 1
+                                    logger.warning(f"[{iteration+1}] 计划审查未通过 (第{plan_regeneration_count}次): {review_result.feedback}")
+                                    yield f"\n⚠️ 计划审查未通过:\n{review_result.feedback}\n"
+                                    messages.append(provider_message.Message(
+                                        role="user",
+                                        content=PromptManager.get_plan_review_feedback(review_result)
+                                    ))
+                                    invalid_response_count = 0
+                                    continue
+                                elif review_result.warnings:
+                                    warnings_text = "\n".join(f"- {w}" for w in review_result.warnings)
+                                    yield f"\n⚠️ 计划审查警告:\n{warnings_text}\n"
+
                             self._state_manager.set_plan_steps(parsed.plan_steps)
                             plan_display = self._state_manager.get_plan_display()
                             logger.warning(f"[{iteration+1}] 生成计划:\n{plan_display}")
@@ -988,6 +1056,9 @@ class PlannerExecutor:
                     if parsed.type == ResponseType.STEP:
                         step_index = parsed.step_index
                         self._state_manager.start_step(step_index)
+                        # Track message index for step verification
+                        if step_verify_enabled:
+                            self._state_manager.mark_step_start_message_index(len(messages))
                         plan_display = self._state_manager.get_plan_display()
                         logger.warning(f"[{iteration+1}] 开始步骤 {step_index}: {parsed.content}")
                         yield f"\n{plan_display}\n"
@@ -1002,6 +1073,27 @@ class PlannerExecutor:
                     # Handle STEP_DONE response - step completed
                     if parsed.type == ResponseType.STEP_DONE:
                         step_index = parsed.step_index
+
+                        # Step verification (执行复审)
+                        if step_verify_enabled:
+                            retry_count = self._state_manager.get_step_verify_retry_count(step_index)
+                            if retry_count < 1:
+                                start_idx = self._state_manager.get_step_start_message_index()
+                                msgs_during = messages[start_idx:] if start_idx >= 0 else []
+                                steps = self._state_manager.get_plan_steps()
+                                step_desc = steps[step_index - 1].description if step_index <= len(steps) else ""
+                                verification = get_step_verifier().verify(step_desc, parsed.content, msgs_during)
+                                if not verification.is_valid:
+                                    self._state_manager.increment_step_verify_retry(step_index)
+                                    logger.warning(f"[{iteration+1}] 步骤 {step_index} 复审未通过: {verification.feedback}")
+                                    yield f"\n⚠️ 步骤 {step_index} 复审未通过:\n{verification.feedback}\n"
+                                    messages.append(provider_message.Message(
+                                        role="user",
+                                        content=PromptManager.get_step_verify_feedback(step_index, verification.feedback)
+                                    ))
+                                    invalid_response_count = 0
+                                    continue
+
                         self._state_manager.complete_step(step_index, parsed.content)
                         plan_display = self._state_manager.get_plan_display()
                         logger.warning(f"[{iteration+1}] 步骤 {step_index} 完成: {parsed.content}")
@@ -1009,6 +1101,16 @@ class PlannerExecutor:
                         
                         # Check if all steps are done
                         if self._state_manager.is_plan_complete():
+                            # Save task memory
+                            if memory_enabled:
+                                try:
+                                    memory_dir = config.get('planner_memory_file', '') or None
+                                    planner_memory = get_planner_memory(memory_dir)
+                                    tools_used = self._extract_tools_used(messages)
+                                    current_user_id = self._get_current_user_id(session)
+                                    planner_memory.save_task_memory(task, parsed.content, tools_used, True, user_id=current_user_id)
+                                except Exception as e:
+                                    logger.warning(f"保存记忆失败: {e}")
                             self._save_conversation_state(messages, task, registry, llm_model_uuid)
                             # Cleanup resources before returning
                             cleanup_msg = await self._cleanup_resources(helper_plugin or plugin)
@@ -1473,7 +1575,10 @@ class PlannerExecutor:
         # Get config
         config = plugin.get_config() if plugin else {}
         rate_limit_seconds = float(config.get('planner_rate_limit_seconds', 1))
-        
+        plan_review_enabled = config.get('planner_plan_review_enabled', True)
+        memory_enabled = config.get('planner_memory_enabled', True)
+        step_verify_enabled = config.get('planner_step_verify_enabled', True)
+
         # Get tools in OpenAI format for native tool calling
         tools_openai_format = []
         if registry:
@@ -1481,9 +1586,10 @@ class PlannerExecutor:
                 tools_openai_format = registry.to_openai_format()
             except Exception as e:
                 logger.error(f"获取 tools_openai_format 失败: {e}")
-        
+
         invalid_response_count = 0
         max_invalid_responses = 5
+        plan_regeneration_count = 0
         
         # ReAct loop
         for iteration in range(max_iterations):
@@ -1532,7 +1638,7 @@ class PlannerExecutor:
             
             # Process response (same logic as execute_task_streaming)
             if response.content:
-                content_str = str(response.content)
+                content_str = _extract_content_text(response.content)
                 logger.warning(f"[{iteration+1}] LLM 思考过程:\n{content_str[:1000]}")
                 
                 if not response.tool_calls:
@@ -1660,7 +1766,7 @@ class PlannerExecutor:
             logger.info(f"Saved conversation state with {len(messages)} messages")
         except Exception as e:
             logger.warning(f"Failed to save conversation state: {e}")
-    
+
     def _update_task_status(self, task_description: str, step: str, tool: str) -> None:
         """Update background task status"""
         try:
@@ -1672,3 +1778,35 @@ class PlannerExecutor:
             )
         except Exception as e:
             logger.debug(f"Failed to update task status: {e}")
+
+    @staticmethod
+    def _extract_tools_used(messages: list) -> list[str]:
+        """Extract unique tool names from message history"""
+        tools = set()
+        for msg in messages:
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if hasattr(tc, 'function') and hasattr(tc.function, 'name'):
+                        tools.add(tc.function.name)
+            if hasattr(msg, 'role') and msg.role == 'tool' and hasattr(msg, 'content'):
+                try:
+                    data = json.loads(str(msg.content))
+                    if isinstance(data, dict) and 'tool' in data:
+                        tools.add(data['tool'])
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        return list(tools)
+
+    @staticmethod
+    def _get_current_user_id(session=None) -> str:
+        """Get the current user ID from session or BackgroundTaskManager"""
+        if session and hasattr(session, 'launcher_id') and session.launcher_id:
+            return str(session.launcher_id)
+        try:
+            from components.commands.langtars import BackgroundTaskManager
+            uid = BackgroundTaskManager.get_current_user()
+            if uid:
+                return uid
+        except Exception:
+            pass
+        return "default"
