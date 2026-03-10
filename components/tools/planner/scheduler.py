@@ -208,6 +208,14 @@ class TaskScheduler:
         state_mgr.reset()
         PlannerTool.reset_task_state()
 
+        # create a run file so that _call_llm_with_stop_check doesn't immediately
+        # cancel the LLM call.  Manual tasks already do this in the command
+        # handler; scheduled tasks must do the same.
+        try:
+            state_mgr.create_run_file()
+        except Exception as e:
+            logger.warning(f"Unable to create run file for scheduled task: {e}")
+
         planner = PlannerTool()
         config = self._plugin.get_config() if hasattr(self._plugin, 'get_config') else {}
 
@@ -226,10 +234,19 @@ class TaskScheduler:
         if not llm_model_uuid:
             raise RuntimeError("没有可用的 LLM 模型")
 
-        # Build helper plugin for tool execution
+        # Build helper plugin for tool execution.  We create a fresh
+        # LangTARS instance to avoid polluting the primary plugin state,
+        # but we still need a reference to the real plugin so that
+        # confirmation messages (and other runtime-dependent APIs) work.
         helper = LangTARS()
         helper.config = config.copy()
         await helper.initialize()
+        # point helper back to the real plugin instance
+        try:
+            helper.plugin = self._plugin
+            helper._plugin = self._plugin
+        except Exception:
+            pass
 
         registry = await planner._get_tool_registry(self._plugin)
         # Exclude scheduler tools to prevent recursive task creation
@@ -243,17 +260,24 @@ class TaskScheduler:
             f"🤖 开始执行定时任务\n\n任务: {task.description[:200]}"
         )
 
-        result = await planner.execute_task(
-            task=task.description,
-            max_iterations=max_iterations,
-            llm_model_uuid=llm_model_uuid,
-            plugin=self._plugin,
-            helper_plugin=helper,
-            registry=filtered_registry,
-        )
+        try:
+            result = await planner.execute_task(
+                task=task.description,
+                max_iterations=max_iterations,
+                llm_model_uuid=llm_model_uuid,
+                plugin=self._plugin,
+                helper_plugin=helper,
+                registry=filtered_registry,
+            )
 
-        # Send result back to user
-        result_text = result[:2000] if result else "（无返回结果）"
-        msg = f"📋 定时任务完成\n\n任务: {task.description[:100]}\n\n结果:\n{result_text}"
-        await self._send_message(task, msg)
-        logger.info(f"定时任务执行完成: {task.task_id}")
+            # Send result back to user
+            result_text = result[:2000] if result else "（无返回结果）"
+            msg = f"📋 定时任务完成\n\n任务: {task.description[:100]}\n\n结果:\n{result_text}"
+            await self._send_message(task, msg)
+            logger.info(f"定时任务执行完成: {task.task_id}")
+        finally:
+            # cleanup run file so subsequent schedules don't cancel immediately
+            try:
+                state_mgr.remove_run_file()
+            except Exception:
+                pass
