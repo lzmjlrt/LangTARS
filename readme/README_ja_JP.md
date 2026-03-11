@@ -40,18 +40,14 @@ LangTARS は異なるアプローチを取ります：
 
 ### 手動デプロイ
 
-1. パッケージマネージャーで LangBot をデプロイ：
-   ```bash
-   uvx langbot@latest
-   ```
-
-2. [ドキュメント](https://docs.langbot.app/zh/usage/platforms/readme)に従ってボットを設定します。
+| ステップ | 操作 |
+|:--------:|------|
+| 1 | パッケージマネージャーで LangBot をデプロイ：`uvx langbot@latest` |
+| 2 | [ドキュメント](https://docs.langbot.app/zh/usage/platforms/readme)に従ってボットを設定 |
+| 3 | プラグインマーケットプレイスから LangTARS プラグインをインストール |
+| 4 | LangTARS プラグイン設定ページで、モデルを選択し、その他の設定を行う |
 
 > 📱 **おすすめ**：**Telegram** または **DingTalk（钉钉）** プラットフォームで LangTARS を使用することをおすすめします。
-
-3. プラグインマーケットプレイスから LangTARS プラグインをインストールします。
-
-4. LangTARS プラグイン設定ページで、モデルを選択し、その他の設定を行います。
 
 
 ## 初回セットアップ - 権限設定

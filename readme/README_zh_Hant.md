@@ -40,18 +40,14 @@ LangTARS 採用不同的方式：
 
 ### 手動部署
 
-1. 使用套件管理器部署 LangBot：
-   ```bash
-   uvx langbot@latest
-   ```
-
-2.按照[文檔](https://docs.langbot.app/zh/usage/platforms/readme)配置機器人。
+| 步驟 | 操作 |
+|:----:|------|
+| 1 | 使用套件管理器部署 LangBot：`uvx langbot@latest` |
+| 2 | 按照[文檔](https://docs.langbot.app/zh/usage/platforms/readme)配置機器人 |
+| 3 | 在插件市場安裝 LangTARS 插件 |
+| 4 | 在 LangTARS 插件設定頁，選擇自己的模型和進行其他設定 |
 
 > 📱 **推薦**：推薦在 **Telegram** 或 **釘釘** 平台使用 LangTARS，以獲得最佳體驗。
-
-3. 在插件市場安裝 LangTARS 插件。
-
-4. 在 LangTARS 插件設定頁，選擇自己的模型和進行其他設定。
 
 
 ## 首次設定 - 權限配置

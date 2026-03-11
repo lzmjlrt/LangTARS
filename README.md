@@ -40,18 +40,14 @@ LangTARS takes a different approach:
 
 ### Manual Deployment
 
-1. Deploy LangBot using the package manager:
-   ```bash
-   uvx langbot@latest
-   ```
-
-2. Configure the bot following the [documentation](https://docs.langbot.app/en/usage/platforms/readme).
+| Step | Action |
+|:----:|--------|
+| 1 | Deploy LangBot using the package manager: `uvx langbot@latest` |
+| 2 | Configure the bot following the [documentation](https://docs.langbot.app/en/usage/platforms/readme) |
+| 3 | Install the LangTARS plugin from the plugin marketplace |
+| 4 | In the LangTARS plugin settings page, select your model and configure other settings |
 
 > 📱 **Recommended**: Use LangTARS on **Telegram** or **DingTalk** platform for the best experience.
-
-3. Install the LangTARS plugin from the plugin marketplace.
-
-4. In the LangTARS plugin settings page, select your model and configure other settings.
 
 
 ## First-Time Setup - Permission Configuration
