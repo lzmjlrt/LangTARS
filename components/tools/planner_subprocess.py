@@ -43,14 +43,23 @@ async def run_planner(args: dict):
     # We need to initialize it properly
     from main import LangTARS
 
+    # Create and initialize plugin instances.  The `plugin` object is
+    # used for LLM/RPC calls, whereas `helper_plugin` is passed to tools for
+    # OS operations.  Both need linkage to the real runtime handler so that
+    # send_message and similar functions work inside the subprocess.
     plugin = LangTARS()
     plugin.config = config.copy()
     await plugin.initialize()
-
-    # Also set config on the helper
+    # helper_plugin may be separate to isolate state, but we attach the
+    # runtime plugin reference so messaging/confirmation functions correctly.
     helper_plugin = LangTARS()
     helper_plugin.config = config.copy()
     await helper_plugin.initialize()
+    try:
+        helper_plugin.plugin = plugin
+        helper_plugin._plugin = plugin
+    except Exception:
+        pass
 
     # Initialize tool registry
     from components.tools.planner_tools.registry import ToolRegistry

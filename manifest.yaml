@@ -224,6 +224,46 @@ spec:
         en_US: 'Automatically close apps and browsers opened during task execution when task completes (default: true)'
         zh_Hans: '任务完成后自动关闭执行过程中打开的应用和浏览器（默认：true）'
       default: true
+    - name: planner_plan_review_enabled
+      type: boolean
+      required: false
+      label:
+        en_US: Enable Plan Review
+        zh_Hans: 启用规划审查
+      description:
+        en_US: 'Validate LLM-generated plans using rule-based checks before execution (default: true)'
+        zh_Hans: '在执行前使用规则校验审查 LLM 生成的计划（默认：true）'
+      default: true
+    - name: planner_memory_enabled
+      type: boolean
+      required: false
+      label:
+        en_US: Enable Persistent Memory
+        zh_Hans: 启用持久记忆
+      description:
+        en_US: 'Save task results and retrieve relevant history for future tasks, isolated per user (default: true)'
+        zh_Hans: '保存任务结果并为未来任务检索相关历史记录，按用户隔离（默认：true）'
+      default: true
+    - name: planner_memory_file
+      type: string
+      required: false
+      label:
+        en_US: Memory Storage Directory
+        zh_Hans: 记忆存储目录
+      description:
+        en_US: 'Directory for persistent memory files (default: system temp directory)'
+        zh_Hans: '持久记忆文件的存储目录（默认：系统临时目录）'
+      default: ''
+    - name: planner_step_verify_enabled
+      type: boolean
+      required: false
+      label:
+        en_US: Enable Step Verification
+        zh_Hans: 启用步骤复审
+      description:
+        en_US: 'Verify step completion claims using rule-based checks before proceeding (default: true)'
+        zh_Hans: '在继续执行前使用规则校验复审步骤完成情况（默认：true）'
+      default: true
   components:
     Command:
       fromDirs:

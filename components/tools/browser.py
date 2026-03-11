@@ -6,9 +6,10 @@ from __future__ import annotations
 import asyncio
 import base64
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
 
 class BrowserManager:
@@ -70,6 +71,21 @@ class BrowserManager:
 
         if not self.config.get('enable_browser', True):
             return {'success': False, 'error': 'Browser automation is disabled'}
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            # Try to auto-install playwright pip package
+            import subprocess
+            import sys
+            try:
+                subprocess.run(
+                    [sys.executable, '-m', 'pip', 'install', 'playwright'],
+                    capture_output=True, text=True, timeout=120
+                )
+                from playwright.async_api import async_playwright
+            except Exception:
+                return {'success': False, 'error': 'playwright is not installed. Please run: pip install playwright && python -m playwright install'}
 
         try:
             self._playwright = await async_playwright().start()

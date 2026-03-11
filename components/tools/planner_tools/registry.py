@@ -66,6 +66,7 @@ from .browser import (
     EdgeSearchTool,
     EdgePressKeyTool,
 )
+from .scheduler_tools import ScheduleTaskTool, ListScheduledTasksTool, CancelScheduledTaskTool
 from .dynamic import DynamicToolLoader
 from .skills import SkillLoader, SkillToToolConverter
 
@@ -92,6 +93,10 @@ BUILTIN_TOOLS: list[type[BasePlannerTool]] = [
     SearchFilesTool,
     # Network tools
     FetchURLTool,
+    # Scheduler tools
+    ScheduleTaskTool,
+    ListScheduledTasksTool,
+    CancelScheduledTaskTool,
     # Browser tools (cross-platform via Playwright)
     BrowserNavigateTool,
     BrowserClickTool,
@@ -258,3 +263,20 @@ class ToolRegistry:
                 lines.append(f"  - {param_name}: {param_info.get('description', '')}{required}")
 
         return "\n".join(lines)
+
+    def create_filtered_copy(self, exclude_names: set[str]) -> 'ToolRegistry':
+        """Create a shallow copy of this registry with certain tools excluded.
+
+        Useful for scheduled task execution where scheduler tools should be excluded
+        to prevent recursive task creation.
+        """
+        copy = ToolRegistry.__new__(ToolRegistry)
+        copy.plugin = self.plugin
+        copy._builtin_tools = {
+            name: tool for name, tool in self._builtin_tools.items()
+            if name not in exclude_names
+        }
+        copy._dynamic_loader = None
+        copy._skill_loader = None
+        copy._initialized = True
+        return copy

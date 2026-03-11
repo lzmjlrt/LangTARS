@@ -70,6 +70,9 @@ class TaskState:
     # Resource tracking for cleanup
     opened_resources: list[OpenedResource] = field(default_factory=list)
     auto_cleanup_enabled: bool = True  # Whether to auto-cleanup resources after task completion
+    # Step verification tracking
+    step_start_message_index: int = -1  # Message index when current step started
+    step_verify_retry_counts: dict = field(default_factory=dict)  # {step_index: retry_count}
 
 
 class StateManager:
@@ -376,6 +379,33 @@ class StateManager:
                 return step.index
         return -1
     
+    # Step verification tracking methods
+
+    def mark_step_start_message_index(self, index: int) -> None:
+        """Record the message list index when a step starts executing"""
+        if self._current_task:
+            self._current_task.step_start_message_index = index
+
+    def get_step_start_message_index(self) -> int:
+        """Get the message index from when the current step started"""
+        if self._current_task:
+            return self._current_task.step_start_message_index
+        return -1
+
+    def increment_step_verify_retry(self, step_index: int) -> int:
+        """Increment and return the verification retry count for a step"""
+        if self._current_task:
+            counts = self._current_task.step_verify_retry_counts
+            counts[step_index] = counts.get(step_index, 0) + 1
+            return counts[step_index]
+        return 0
+
+    def get_step_verify_retry_count(self, step_index: int) -> int:
+        """Get the verification retry count for a step"""
+        if self._current_task:
+            return self._current_task.step_verify_retry_counts.get(step_index, 0)
+        return 0
+
     # Resource tracking methods
     
     def track_opened_resource(

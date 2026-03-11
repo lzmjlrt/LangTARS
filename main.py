@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import locale
 import logging
 import platform
 
@@ -24,9 +25,9 @@ IS_MACOS = platform.system() == "Darwin"
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
 
-# Detect system encoding for subprocess output (GBK on Chinese Windows, etc.)
-# Note: On Windows, we force UTF-8 output via chcp 65001 / [Console]::OutputEncoding
-logger.warning("[LangTARS] Encoding: subprocess output forced to UTF-8 on Windows")
+# Detect system encoding for subprocess output (GBK/cp936 on Chinese Windows, etc.)
+SYSTEM_ENCODING = locale.getpreferredencoding(False) or 'utf-8'
+logger.warning(f"[LangTARS] System subprocess encoding: {SYSTEM_ENCODING}")
 
 # Import platform-specific modules
 if IS_MACOS:
@@ -202,10 +203,8 @@ class LangTARS(Command, BasePlugin):
         try:
             # Use different shell based on platform
             if IS_WINDOWS:
-                # Force cmd.exe to output UTF-8 via chcp 65001
-                utf8_command = f'chcp 65001 >nul && {command}'
                 process = await asyncio.create_subprocess_shell(
-                    utf8_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     cwd=str(working_path), shell=True)
             else:
                 process = await asyncio.create_subprocess_shell(
@@ -215,10 +214,12 @@ class LangTARS(Command, BasePlugin):
             except asyncio.TimeoutError:
                 process.kill()
                 return {'success': False, 'error': f'Timeout after {timeout}s', 'stdout': '', 'stderr': '', 'returncode': -1}
+            # Decode with system encoding on Windows (e.g. cp936 for Chinese), UTF-8 on Unix
+            encoding = SYSTEM_ENCODING if IS_WINDOWS else 'utf-8'
             return {
                 'success': process.returncode == 0,
-                'stdout': stdout.decode('utf-8', errors='replace'),
-                'stderr': stderr.decode('utf-8', errors='replace'),
+                'stdout': stdout.decode(encoding, errors='replace'),
+                'stderr': stderr.decode(encoding, errors='replace'),
                 'returncode': process.returncode, 'error': '',
             }
         except Exception as e:

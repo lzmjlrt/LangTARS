@@ -750,7 +750,10 @@ Go to Pipelines → Configure → Select LLM Model
             tool=""
         )
         BackgroundTaskManager._task_running = True
-        
+
+        # Store current user ID for scheduler tools
+        BackgroundTaskManager._current_user_id = user_id
+
         # Set message context for confirmation notifications
         try:
             bot_uuid_ctx = None
@@ -770,6 +773,15 @@ Go to Pipelines → Configure → Select LLM Model
                 )
         except Exception as e:
             logger.warning(f"Failed to set message context: {e}")
+
+        # Lazy-start the task scheduler (runs once, subsequent calls are no-op)
+        try:
+            from components.tools.planner.scheduler import TaskScheduler
+            _scheduler = TaskScheduler.get_instance()
+            if not _scheduler._running:
+                await _scheduler.start(_self_cmd.plugin)
+        except Exception as e:
+            logger.warning(f"Failed to start task scheduler: {e}")
 
         # Send task start notification to user
         try:

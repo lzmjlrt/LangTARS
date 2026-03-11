@@ -81,9 +81,13 @@ class ResponseParser:
         if not content or not content.strip():
             return ParsedResponse(type=ResponseType.INVALID)
         
-        content_stripped = content.strip()
+        # Strip <think>...</think> tags from LLM reasoning output
+        content_stripped = re.sub(r'<think>.*?</think>\s*', '', content.strip(), flags=re.DOTALL).strip()
+        if not content_stripped:
+            return ParsedResponse(type=ResponseType.INVALID)
+
         content_upper = content_stripped.upper()
-        
+
         # IMPORTANT: Check for tool calls FIRST (both JSON and XML format)
         # This ensures tool calls are processed even when mixed with PLAN/STEP responses
         tool_call = self.extract_tool_call(content)
@@ -92,12 +96,21 @@ class ResponseParser:
                 type=ResponseType.TOOL_CALL,
                 tool_call=tool_call
             )
-        
-        # Check for DONE response
+
+        # Check for DONE response — also handle DONE: appearing after
+        # a preamble line (LLM sometimes adds a short sentence before DONE:)
         if content_upper.startswith("DONE:"):
             return ParsedResponse(
                 type=ResponseType.DONE,
                 content=content_stripped[5:].strip()
+            )
+        done_match = re.search(r'^DONE:\s*', content_stripped, re.IGNORECASE | re.MULTILINE)
+        if done_match:
+            done_content = content_stripped[done_match.end():].strip()
+            logger.debug(f"[parser] DONE: found at offset {done_match.start()}, not at start. Preamble: {content_stripped[:done_match.start()]!r}")
+            return ParsedResponse(
+                type=ResponseType.DONE,
+                content=done_content
             )
         
         # Check for WORKING response
@@ -106,12 +119,24 @@ class ResponseParser:
                 type=ResponseType.WORKING,
                 content=content_stripped[8:].strip()
             )
-        
+        working_match = re.search(r'^WORKING:\s*', content_stripped, re.IGNORECASE | re.MULTILINE)
+        if working_match:
+            return ParsedResponse(
+                type=ResponseType.WORKING,
+                content=content_stripped[working_match.end():].strip()
+            )
+
         # Check for NEED_SKILL response
         if content_upper.startswith("NEED_SKILL:"):
             return ParsedResponse(
                 type=ResponseType.NEED_SKILL,
                 content=content_stripped[11:].strip()
+            )
+        need_skill_match = re.search(r'^NEED_SKILL:\s*', content_stripped, re.IGNORECASE | re.MULTILINE)
+        if need_skill_match:
+            return ParsedResponse(
+                type=ResponseType.NEED_SKILL,
+                content=content_stripped[need_skill_match.end():].strip()
             )
         
         # Check for PLAN response
