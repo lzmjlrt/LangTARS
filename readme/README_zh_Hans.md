@@ -14,7 +14,7 @@
 </p>
 
 > ⚠️ **注意**：功能仍在积极开发中，如遇 bug 请提交 [issue](https://github.com/langbot-app/LangTARS/issues)。
-> 目前使用此插件，会遇到权限问题，在第一次执行的任务的时候，若弹出权限问题，则需要使用者手动开启权限。
+
 
 ---
 
@@ -36,28 +36,23 @@ LangTARS 采用不同的方式：
 
 ## 快速开始
 
-> ⚠️ **注意**：目前只测试过手动部署代码的方式。
+> ⚠️ **注意**：目前只测试过包管理器的方式。
 
 ### 手动部署
 
-1. 安装 langbot-plugin：
+1. 使用包管理器部署 LangBot：
    ```bash
-   pip install langbot-plugin
-   ```
-2. 安装依赖：
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. 参照 `.env.example` 新建一个 `.env` 文件并配置（端口地址应与 LangBot 插件地址相同）：
-   ```bash
-   cp .env.example .env
-   ```
-4. 运行插件：
-   ```bash
-   lbp run
+   uvx langbot@latest
    ```
 
+2.按照[文档](https://docs.langbot.app/zh/usage/platforms/readme)配置机器人。
+
 > 📱 **推荐**：推荐在 **Telegram** 或 **钉钉** 平台使用 LangTARS，以获得最佳体验。
+
+3. 在插件市场安装 LangTARS 插件。
+
+4. 在 LangTARS 插件设置页，选择自己的模型和进行其他设置。 
+
 
 ## 首次设置 - 权限配置
 

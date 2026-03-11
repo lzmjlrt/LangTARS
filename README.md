@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>LangTARS</strong> — Native Claw-Like Plugin
+  <strong>LangTARS</strong> — Native LangBot Plugin
 </p>
 
 <p align="center">
@@ -14,6 +14,7 @@
 </p>
 
 > ⚠️ **Note**: Features are still under active development. If you encounter any bugs, please submit an [issue](https://github.com/langbot-app/LangTARS/issues).
+
 
 ---
 
@@ -35,28 +36,46 @@ LangTARS takes a different approach:
 
 ## Quick Start
 
-> ⚠️ **Note**: Currently only manual deployment has been tested.
+> ⚠️ **Note**: Currently only the package manager method has been tested.
 
 ### Manual Deployment
 
-1. Install langbot-plugin:
+1. Deploy LangBot using the package manager:
    ```bash
-   pip install langbot-plugin
-   ```
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Create a `.env` file by copying from `.env.example` and configure it (the port should match the LangBot plugin address):
-   ```bash
-   cp .env.example .env
-   ```
-4. Run the plugin:
-   ```bash
-   lbp run
+   uvx langbot@latest
    ```
 
+2. Configure the bot following the [documentation](https://docs.langbot.app/en/usage/platforms/readme).
+
 > 📱 **Recommended**: Use LangTARS on **Telegram** or **DingTalk** platform for the best experience.
+
+3. Install the LangTARS plugin from the plugin marketplace.
+
+4. In the LangTARS plugin settings page, select your model and configure other settings.
+
+
+## First-Time Setup - Permission Configuration
+
+### macOS Permissions
+
+Before first use, you need to grant some permissions:
+
+#### AppleScript Automation Permission
+- Open **System Preferences** > **Privacy & Security** > **Accessibility**
+- Click the 🔒 in the bottom left to unlock
+- Add **Terminal** or your chat application (e.g., WeChat, Telegram, etc.)
+
+#### Safari JavaScript Permission (Optional)
+- Open **Safari** > **Settings** > **Advanced**
+- Check **Allow JavaScript from Apple Events**
+
+### Windows Permissions
+
+On Windows, LangTARS uses PowerShell and UI Automation for system control, typically no additional permission configuration is required.
+
+### Linux Permissions
+
+On Linux, LangTARS uses standard shell commands for system control, typically no additional permission configuration is required. Ensure `xdg-open` is available for opening URLs and applications.
 
 ## Usage
 
@@ -131,16 +150,10 @@ Configure LangTARS through LangBot's settings:
 | `enable_app` | Enable app control | true |
 | `enable_applescript` | Enable AppleScript execution (macOS) | true |
 | `enable_powershell` | Enable PowerShell execution (Windows) | true |
-| `enable_browser` | Enable browser automation (Playwright) | true |
-| `browser_type` | Browser engine (chromium/firefox/webkit) | chromium |
-| `browser_headless` | Run browser in headless mode | false |
-| `browser_timeout` | Browser operation timeout (seconds) | 30 |
 | `planner_max_iterations` | Max ReAct loop iterations | 5 |
 | `planner_model_uuid` | LLM model for task planning | (first available) |
 | `planner_rate_limit_seconds` | Rate limit between LLM calls | 1 |
 | `planner_auto_load_mcp` | Auto-load MCP tools | true |
-| `planner_auto_load_skills` | Auto-load skills from ~/.claude/skills | true |
-| `skills_path` | Skills directory path | ~/.claude/skills |
 
 ## Safety Features
 

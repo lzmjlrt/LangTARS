@@ -9,11 +9,12 @@
 <p align="center">
   <a href="../README.md">English</a>&nbsp; • &nbsp;
   <a href="README_zh_Hans.md">简体中文</a>&nbsp; • &nbsp;
+  <a href="README_ja_JP.md">日本語</a>&nbsp; • &nbsp;
   <a href="https://github.com/langbot-app/LangTARS">GitHub</a>
 </p>
 
-> ⚠️ **注意**：功能仍在積極開發中。如遇任何問題，請提交 [issue](https://github.com/langbot-app/LangTARS/issues)。
-> 目前使用此插件，會遇到權限問題，在第一次執行任務的時候，若彈出權限問題，則需要使用者手動開啟權限。
+> ⚠️ **注意**：功能仍在積極開發中，如遇 bug 請提交 [issue](https://github.com/langbot-app/LangTARS/issues)。
+
 
 ---
 
@@ -35,28 +36,23 @@ LangTARS 採用不同的方式：
 
 ## 快速開始
 
-> ⚠️ **注意**：目前只測試過手動部署程式碼的方式。
+> ⚠️ **注意**：目前只測試過套件管理器的方式。
 
 ### 手動部署
 
-1. 安裝 langbot-plugin：
+1. 使用套件管理器部署 LangBot：
    ```bash
-   pip install langbot-plugin
-   ```
-2. 安裝依賴：
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. 參照 `.env.example` 新建一個 `.env` 檔案並設定（端口地址應與 LangBot 插件地址相同）：
-   ```bash
-   cp .env.example .env
-   ```
-4. 執行插件：
-   ```bash
-   lbp run
+   uvx langbot@latest
    ```
 
+2.按照[文檔](https://docs.langbot.app/zh/usage/platforms/readme)配置機器人。
+
 > 📱 **推薦**：推薦在 **Telegram** 或 **釘釘** 平台使用 LangTARS，以獲得最佳體驗。
+
+3. 在插件市場安裝 LangTARS 插件。
+
+4. 在 LangTARS 插件設定頁，選擇自己的模型和進行其他設定。
+
 
 ## 首次設定 - 權限配置
 
@@ -88,7 +84,7 @@ Linux 上 LangTARS 使用標準 shell 命令進行系統控制，通常無需額
 只需描述您想要做的事情，AI 就會自主規劃並執行任務。
 
 **範例：**
-- `!tars 打開 Safari，訪問 langbot.app, 擷取元素並告訴我`
+- `!tars 開啟 Safari，訪問 langbot.app，擷取元素並告訴我`
 - `!tars 新建一個備忘錄，標題和內容為你好`
 - `!tars 幫我整理桌面上的檔案`
 - `!tars 把結果儲存到檔案`（如果有上次任務歷史，會自動繼續）
